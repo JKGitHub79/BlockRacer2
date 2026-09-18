@@ -44,16 +44,16 @@ offset = car heading − road heading at the car's position,   |offset| ≤ Turn
   until it hits the Turning Angle. Because the limit is on the *offset*, the car
   can never rotate more than that away from the road and can never spin around.
 * Releasing the keys lets the offset fall back towards **0**, which means
-  "pointing the same way as this part of the track". So after a 45° left-hander
+  "pointing the same way as this part of the track". So after a left-hander
   the car settles at 45° in world terms — which is 0° relative to the road — and
   holds it. That is the behaviour the design asks for.
 * That fall-back is **proportional**, not a fixed rate: `returnRateDeg` is the
   speed at 45° of offset, and it scales down linearly from there. A car at full
   lock snaps back hard; a nearly-straight car is barely nudged.
-* Even so, the car **cannot follow a corner unaided**. The bends turn at 45°
-  over 0.4s = 112°/s. Let go mid-corner and you run ~100px wide on a road whose
-  edge is 64px from the centre, and spend about 11s of a 12s lap on the grass.
-  Corners have to be driven.
+* Even so, the car **cannot follow a corner unaided**. Every bend turns at
+  112°/s. Let go mid-corner and you run ~180px wide on a road whose edge is
+  96px from the centre, and spend about 20s of a 32s lap on the grass. Corners
+  have to be driven.
 
 Why proportional return matters: a *constant* rate ties responsiveness to
 difficulty and you cannot have both. Fast enough to feel good (≥80°/s) and a
@@ -67,7 +67,7 @@ this game, and it was wrong. Proportional return separates the two concerns:
 | Turn-in to full lock | 0.22s | **0.17s** |
 | Half the angle back | 0.57s | **0.18s** |
 | Fully settled | 1.06s | **0.71s** |
-| Hands-off lap | 12.4s on grass | 11.4s on grass |
+| Hands-off lap | fails | fails |
 
 `tools/simulate.js` asserts both halves — the corners stay demanding *and* the
 steering stays responsive — so neither can regress by accident.
@@ -79,22 +79,31 @@ off the road the car is lifted back onto the racing line at half speed
 
 ## Track 1
 
-| Section | |
-| --- | --- |
-| Straight | 1s |
-| Left 45° + straight | 3s |
-| Right 45° + straight | 3s |
-| Left 45° + straight | 3s |
-| **Qualifying time** | **12.00s** |
+The original layout, then the same layout again with 90° turns:
 
-Road width is 4 car widths (128px). Grass either side.
+| Part 1 | | Part 2 | |
+| --- | --- | --- | --- |
+| Straight | 1s | Straight | 1s |
+| Left 45° + straight | 3s | Left 90° + straight | 3s |
+| Right 45° + straight | 3s | Right 90° + straight | 3s |
+| Left 45° + straight | 3s | Left 90° + straight | 3s |
+| | | **Qualifying time** | **22.50s** |
+
+20s of track. Road is **3 lanes** — 6 car widths (192px) with two dashed
+dividers. Grass either side.
+
+Every corner has the same **214px radius**: the 90° turns take twice the arc
+time (0.8s vs 0.4s) for twice the angle. That matters — a 90° turn taken in
+0.4s would have a 107px radius against a 96px half-width, leaving an 11px
+inner edge, which is a kink rather than a corner.
 
 Sections are defined in **seconds at full speed**, not in pixels, so changing
 Full Speed makes the track physically longer and a clean lap still takes about
 the same time — it just feels faster and gives you less time to react.
 
-A clean lap is about **10.8s**, so qualifying leaves roughly 1.2s of slack. One
-trip onto the grass costs more than that.
+A clean lap is about **20.3s**, so qualifying leaves roughly 2.2s of slack —
+the same ~11% margin the shorter version had. One trip onto the grass costs
+more than that.
 
 ## Configuration
 

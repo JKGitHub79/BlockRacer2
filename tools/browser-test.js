@@ -89,14 +89,19 @@ function shot(page, name) {
   }
 
   function run() {
+    var qualifying = null;
     console.log('\n=== Title screen ===\n');
 
     return state().then(function (s0) {
       check('starts on the title screen', s0.phase === 'title');
+      qualifying = s0.qualifying;
       return page.textContent('#config-summary');
     }).then(function (summary) {
+      // Read the expected time from the game rather than hardcoding it, so
+      // changing the track does not require editing this test.
       check('summary names the track and qualifying time',
-            /Track 1/.test(summary) && /12\.00s/.test(summary), summary.trim());
+            /Track 1/.test(summary) && summary.indexOf(qualifying.toFixed(2) + 's') > -1,
+            summary.trim());
 
       // Every slider must reach the live config and show its own readout.
       var sliders = [

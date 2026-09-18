@@ -103,7 +103,11 @@ BR.DEFAULT_CONFIG = {
 
   carWidth: 32,          // world pixels
   carLength: 56,         // world pixels
-  roadWidthInCars: 4,    // road width measured in car widths -> 4 * 32 = 128px
+
+  // Road width in car widths. 3 lanes at 2 car widths each -> 6 * 32 = 192px.
+  // Lane dividers are drawn at +/- roadWidth/6, splitting it into three.
+  roadWidthInCars: 6,
+  lanes: 3,
 
   // How far ahead of the car the camera looks, as a fraction of a screen
   // height, at Full Speed. 0 keeps the car dead centre.
@@ -116,14 +120,23 @@ BR.DEFAULT_CONFIG = {
   //   { type: 'straight', seconds }
   //   { type: 'turn', dir: -1 (left) | +1 (right), degrees, seconds }
   //
-  // Track 1 layout, per the design:
-  //   straight 1s | left + straight 3s | right + straight 3s | left 45 + straight 3s
-  // = 10s of track. Add roughly 1s lost to the standing start and a clean run
-  // lands just under the 12s qualifying time.
+  // Track 1 is the original layout followed by the same layout again with 90
+  // degree turns instead of 45:
+  //
+  //   Part 1  straight 1s | L45 + straight 3s | R45 + straight 3s | L45 + straight 3s
+  //   Part 2  straight 1s | L90 + straight 3s | R90 + straight 3s | L90 + straight 3s
+  //
+  // = 20s of track. Every corner has the same 214px radius: the 90 degree
+  // turns take twice the arc time (0.8s vs 0.4s) for twice the angle, which
+  // keeps the road from kinking. At 0.4s a 90 degree turn would have a 107px
+  // radius against a 96px half-width, leaving an 11px inner edge — undrivable.
   track: {
     name: 'Track 1',
-    qualifyingTime: 12.0,  // seconds, PER LAP
+    // A clean lap is ~20.3s, so this leaves ~11% slack — the same proportional
+    // margin the 10s version had at 12.0s against a 10.8s lap.
+    qualifyingTime: 22.5,  // seconds, PER LAP
     segments: [
+      /* --- Part 1: 45 degree turns --- */
       { type: 'straight', seconds: 1.0 },
 
       { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
@@ -133,7 +146,19 @@ BR.DEFAULT_CONFIG = {
       { type: 'straight', seconds: 2.6 },
 
       { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
-      { type: 'straight', seconds: 2.6 }
+      { type: 'straight', seconds: 2.6 },
+
+      /* --- Part 2: the same layout with 90 degree turns --- */
+      { type: 'straight', seconds: 1.0 },
+
+      { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
+      { type: 'straight', seconds: 2.2 },
+
+      { type: 'turn', dir: +1, degrees: 90, seconds: 0.8 },
+      { type: 'straight', seconds: 2.2 },
+
+      { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
+      { type: 'straight', seconds: 2.2 }
     ]
   }
 };

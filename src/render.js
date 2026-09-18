@@ -10,7 +10,7 @@
     verge:      '#e8e4d6',
     asphalt:    '#4a4a52',
     asphaltEdge:'#ffffff',
-    centreLine: '#f2d94e',
+    laneLine:   '#f2d94e',
     carBody:    '#e03b3b',
     carRoof:    '#2b2b33',
     carGlass:   '#8fd0ee'
@@ -95,6 +95,22 @@
     ctx.beginPath();
     ctx.moveTo(pts[range.from].x, pts[range.from].y);
     for (var i = range.from + 1; i <= range.to; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  };
+
+  /* The centreline shifted sideways by `offset` px (positive = to the right of
+   * the direction of travel). Used for the lane dividers. Safe because the
+   * offsets are far smaller than the 214px corner radius, so the shifted path
+   * cannot fold back on itself. */
+  Renderer.prototype.traceOffsetPath = function (range, offset) {
+    var ctx = this.ctx;
+    var pts = this.track.points;
+    ctx.beginPath();
+    for (var i = range.from; i <= range.to; i++) {
+      var p = pts[i];
+      var x = p.x - Math.sin(p.h) * offset;
+      var y = p.y + Math.cos(p.h) * offset;
+      if (i === range.from) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
   };
 
   /* A checkered band laid across the road at distance `s`. */
@@ -194,12 +210,17 @@
       ctx.lineWidth = this.track.halfWidth * 2 - 8;
       ctx.stroke();
 
-      // Dashed centre line.
-      this.tracePath(range);
+      // Dashed lane dividers. A road of `lanes` lanes needs lanes-1 dividers,
+      // evenly spaced across the width.
+      var lanes = this.cfg.lanes || 2;
       ctx.setLineDash([26, 26]);
-      ctx.strokeStyle = COLOURS.centreLine;
+      ctx.strokeStyle = COLOURS.laneLine;
       ctx.lineWidth = 3;
-      ctx.stroke();
+      for (var n = 1; n < lanes; n++) {
+        var offset = (n / lanes - 0.5) * this.track.halfWidth * 2;
+        this.traceOffsetPath(range, offset);
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
     }
 

@@ -1,0 +1,140 @@
+# BlockRacer2 — Stage 1
+
+A top-down 2D time trial. The car accelerates on its own, there is no brake, and
+the only thing you control is the wheel. Beat the qualifying time.
+
+![Track 1](docs/racing.png)
+
+## Running it
+
+No build step and no dependencies. Open `index.html` in a browser.
+
+The scripts are plain (non-module) so `file://` works — double-clicking the file
+is enough. If you prefer a server:
+
+```
+npm start        # http://localhost:8080
+```
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| <kbd>&larr;</kbd> / <kbd>A</kbd> | Steer left |
+| <kbd>&rarr;</kbd> / <kbd>D</kbd> | Steer right |
+| <kbd>Enter</kbd> / <kbd>Space</kbd> | Start / race again |
+| <kbd>R</kbd> | Restart |
+| <kbd>P</kbd> / <kbd>Esc</kbd> | Pause |
+
+There is no throttle and no brake. Acceleration is automatic.
+
+## How the steering works
+
+This is the part worth understanding, because it is not how most racing games
+behave.
+
+The car's heading is real state. What the **Turning Angle** limits is the
+*offset* between the car's heading and the direction of the road underneath it:
+
+```
+offset = car heading − road heading at the car's position,   |offset| ≤ Turning Angle
+```
+
+* Holding left or right pushes the offset outwards, at `steerRateDeg` per second,
+  until it hits the Turning Angle. Because the limit is on the *offset*, the car
+  can never rotate more than that away from the road and can never spin around.
+* Releasing the keys lets the offset fall back towards **0**, which means
+  "pointing the same way as this part of the track". So after a 45° left-hander
+  the car settles at 45° in world terms — which is 0° relative to the road — and
+  holds it. That is the behaviour the design asks for.
+* The fall-back rate (`returnRateDeg`, 40°/s) is **deliberately slower than a
+  corner turns** (45° over 0.4s = 112°/s). Let go mid-corner and the car cannot
+  follow the bend: it runs about 130px wide on a road whose edge is 64px from
+  the centre. Corners have to be driven.
+
+That last point is the whole game. `tools/simulate.js` asserts it, so it cannot
+be tuned away by accident.
+
+Running onto the grass is not a crash — it caps you at 45% of full speed until
+you get back on the tarmac, which is usually enough to lose qualifying. After 3s
+off the road the car is lifted back onto the racing line at half speed
+(`offRoadResetSeconds`, set to 0 to disable); see *Notes* below for why.
+
+## Track 1
+
+| Section | |
+| --- | --- |
+| Straight | 1s |
+| Left 45° + straight | 3s |
+| Right 45° + straight | 3s |
+| Left 45° + straight | 3s |
+| **Qualifying time** | **12.00s** |
+
+Road width is 4 car widths (128px). Grass either side.
+
+Sections are defined in **seconds at full speed**, not in pixels, so changing
+Full Speed makes the track physically longer and a clean lap still takes about
+the same time — it just feels faster and gives you less time to react.
+
+A clean lap is about **10.8s**, so qualifying leaves roughly 1.2s of slack. One
+trip onto the grass costs more than that.
+
+## Configuration
+
+The four headline settings are on the title screen **and** in `config.js`:
+
+| Setting | Default | Range |
+| --- | --- | --- |
+| Turning Angle | 45° | 5–90° |
+| Acceleration (time to full speed) | 2.0s | 0.2–10s |
+| No. Laps | 1 | 1–20 |
+| Full Speed | 420 px/s | 120–1200 |
+
+`config.js` is the source of truth. Title-screen changes are saved per-browser
+in `localStorage` and layered on top; **Reset to file defaults** discards them.
+Values are clamped on both paths, so a bad hand-edit cannot make the game
+unplayable.
+
+`config.js` also holds handling tuning (`steerRateDeg`, `returnRateDeg`), the
+off-road penalty, car and road dimensions, and the Track 1 section list itself.
+
+## Tests
+
+```
+npm test            # headless physics harness (no browser)
+npm run test:browser  # drives a full lap in headless Chromium (needs Playwright)
+```
+
+`tools/simulate.js` loads the real `config.js`, `track.js` and `car.js` in a VM
+and runs the same fixed-step loop as the game. It checks that a clean lap
+qualifies without being a free pass, that a hands-off lap leaves the road, that
+the Turning Angle clamp holds at full lock, that acceleration reaches full speed
+in exactly the configured time, and that all this survives the extremes of every
+title-screen setting.
+
+`tools/browser-test.js` loads the page in Chromium, exercises the title-screen
+sliders and the reset button, then drives a full lap with real key events and
+asserts the result screen reports QUALIFIED.
+
+## Notes and known limitations
+
+* Physics run at a fixed 1/120s step, independent of display refresh rate — lap
+  times are the same on a 60Hz and a 144Hz monitor.
+* **Multi-lap is a soft target.** Track 1 is point-to-point, so laps after the
+  first restart the car at the start line carrying its speed. Those rolling-start
+  laps are about 1s quicker than the standing-start first lap, while the
+  qualifying target is a flat `12s × laps`. Setting laps above 1 therefore gets
+  easier, not harder. A closed circuit in a later stage would fix this properly.
+* **Off-road recovery is an addition to the brief**, which has no crash or
+  recovery rule. It is a playability feature rather than a safety net: because
+  the Turning Angle clamp keeps the car within 45° of the road direction, the
+  car always retains a forward component and always reaches the line either way
+  — I assumed otherwise at first and the test in `tools/simulate.js` disproved
+  it. What recovery actually fixes is the state you are left in. Realigning the
+  car's *heading* with the road does nothing to pull its *position* back, so
+  without it a botched corner leaves you running parallel to the track and over
+  1200px wide of it for the rest of the lap, with the road off screen. Set
+  `offRoadResetSeconds: 0` in `config.js` for strict brief behaviour.
+* Apart from that there is no collision or damage model; the speed cap and the
+  recovery are the only consequences of leaving the road.
+* The camera translates but does not rotate, so corners read as corners.

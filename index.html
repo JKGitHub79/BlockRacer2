@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlockRacer2 &mdash; Stage 1</title>
+<style>
+  :root {
+    --ink: #eef1f6;
+    --muted: rgba(238,241,246,0.6);
+    --panel: #171b25;
+    --panel-2: #1f2432;
+    --line: rgba(255,255,255,0.12);
+    --accent: #7ec8f2;
+    --good: #7ef2a6;
+    --bad: #ff7676;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #0b0d13;
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  }
+  body { display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  #stage {
+    position: relative;
+    width: 960px; max-width: 100%;
+    aspect-ratio: 960 / 600;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  #game { display: block; width: 100%; height: 100%; background: #3f7a34; }
+
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; padding: 24px;
+    background: rgba(8,10,16,0.82);
+    backdrop-filter: blur(3px);
+    text-align: center;
+  }
+  .overlay.hidden { display: none; }
+
+  h1 { margin: 0; font-size: 40px; letter-spacing: 3px; }
+  h1 small { display: block; font-size: 12px; letter-spacing: 4px; color: var(--muted); margin-top: 6px; font-weight: 400; }
+  h2 { margin: 0; font-size: 34px; letter-spacing: 2px; }
+
+  .settings {
+    width: 100%; max-width: 560px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .setting { display: grid; grid-template-columns: 1fr 150px 74px; align-items: center; gap: 12px; padding: 7px 0; }
+  .setting + .setting { border-top: 1px solid rgba(255,255,255,0.06); }
+  .setting label { text-align: left; font-size: 13px; }
+  .setting label em { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .setting output { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; text-align: right; color: var(--accent); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  #config-summary { font-size: 12px; color: var(--muted); }
+
+  .buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font: inherit; font-weight: 600; font-size: 14px;
+    padding: 10px 22px; border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink);
+    cursor: pointer;
+  }
+  button:hover { background: #2a3142; }
+  button.primary { background: var(--accent); color: #0b0d13; border-color: transparent; }
+  button.primary:hover { background: #9ad6f6; }
+
+  .controls { font-size: 12px; color: var(--muted); line-height: 1.7; max-width: 560px; }
+  kbd {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px;
+    padding: 1px 6px; font-family: inherit; font-size: 11px;
+  }
+  .result-good { color: var(--good); }
+  .result-bad  { color: var(--bad); }
+  #result-body { font-size: 16px; line-height: 1.8; }
+  #result-body strong { font-size: 26px; }
+  .delta { font-weight: 700; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="game" width="960" height="600"></canvas>
+
+  <!-- ------------------------------- TITLE ------------------------------- -->
+  <div id="title-screen" class="overlay">
+    <h1>BLOCKRACER<small>TOP-DOWN TIME TRIAL &mdash; STAGE 1</small></h1>
+
+    <div class="settings">
+      <div class="setting">
+        <label for="cfg-turning-angle">Turning Angle
+          <em>How far the car may point away from the road</em></label>
+        <input type="range" id="cfg-turning-angle">
+        <output id="cfg-turning-angle-value"></output>
+      </div>
+      <div class="setting">
+        <label for="cfg-acceleration">Acceleration
+          <em>Time from a standstill to full speed</em></label>
+        <input type="range" id="cfg-acceleration">
+        <output id="cfg-acceleration-value"></output>
+      </div>
+      <div class="setting">
+        <label for="cfg-laps">No. Laps
+          <em>Qualifying time scales with lap count</em></label>
+        <input type="range" id="cfg-laps">
+        <output id="cfg-laps-value"></output>
+      </div>
+      <div class="setting">
+        <label for="cfg-full-speed">Full Speed
+          <em>Top speed &mdash; the track scales to match, so a clean lap stays ~12s</em></label>
+        <input type="range" id="cfg-full-speed">
+        <output id="cfg-full-speed-value"></output>
+      </div>
+    </div>
+
+    <div id="config-summary"></div>
+
+    <div class="buttons">
+      <button id="btn-start" class="primary">Start Race</button>
+      <button id="btn-reset">Reset to file defaults</button>
+    </div>
+
+    <div class="controls">
+      <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or <kbd>A</kbd> <kbd>D</kbd> to steer &nbsp;&bull;&nbsp;
+      <kbd>Enter</kbd> start &nbsp;&bull;&nbsp; <kbd>R</kbd> restart &nbsp;&bull;&nbsp; <kbd>P</kbd> pause
+      <br>
+      The car accelerates on its own and there is no brake. Release the steering and the car
+      settles back onto the direction of the road &mdash; but not fast enough to take a corner
+      for you, so drive the corners.
+    </div>
+  </div>
+
+  <!-- ------------------------------ RESULT ------------------------------- -->
+  <div id="result-screen" class="overlay hidden">
+    <h2 id="result-heading"></h2>
+    <div id="result-body"></div>
+    <div class="buttons">
+      <button id="btn-again" class="primary">Race Again</button>
+      <button id="btn-menu">Title Screen</button>
+    </div>
+  </div>
+
+  <!-- ------------------------------- PAUSE ------------------------------- -->
+  <div id="pause-overlay" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <div class="controls"><kbd>P</kbd> or <kbd>Esc</kbd> to resume &nbsp;&bull;&nbsp; <kbd>R</kbd> to restart</div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="src/settings.js"></script>
+<script src="src/track.js"></script>
+<script src="src/car.js"></script>
+<script src="src/render.js"></script>
+<script src="src/hud.js"></script>
+<script src="src/game.js"></script>
+</body>
+</html>

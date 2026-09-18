@@ -101,7 +101,9 @@
       turningAngleDeg:  document.getElementById('cfg-turning-angle'),
       accelerationTime: document.getElementById('cfg-acceleration'),
       laps:             document.getElementById('cfg-laps'),
-      fullSpeed:        document.getElementById('cfg-full-speed')
+      fullSpeed:        document.getElementById('cfg-full-speed'),
+      steerRateDeg:     document.getElementById('cfg-steer-rate'),
+      returnRateDeg:    document.getElementById('cfg-return-rate')
     };
   };
 
@@ -124,6 +126,7 @@
     if (key === 'turningAngleDeg') return value + '°';
     if (key === 'accelerationTime') return Number(value).toFixed(1) + 's';
     if (key === 'fullSpeed') return value + ' px/s';
+    if (key === 'steerRateDeg' || key === 'returnRateDeg') return value + '\u00B0/s';
     return String(value);
   };
 

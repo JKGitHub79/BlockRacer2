@@ -98,7 +98,10 @@ check('a clean lap stays on the road', clean.offRoadTime < 0.30);
 // ---------------------------------------------------------------------------
 console.log('\n=== 2. Hands off the wheel (corners must need driving) ===\n');
 
-var hands = run(base, function () { return 0; });
+// Recovery is disabled here on purpose: lifting the car back onto the track
+// after 3s truncates the excursion and would understate how far a hands-off
+// car actually strays. This section is about the steering model alone.
+var hands = run(makeConfig({ offRoadResetSeconds: 0 }), function () { return 0; });
 console.log('  lap time       ' + fmt(hands.lapTime) + 's');
 console.log('  time off road  ' + hands.offRoadTime.toFixed(2) + 's');
 console.log('  max lateral    ' + hands.maxLateral.toFixed(1) + ' px  (road edge at '
@@ -260,6 +263,55 @@ check('recovery ends a botched run sooner',
       withRecovery.finished !== null && without.finished !== null
         && withRecovery.finished < without.finished,
       fmt(withRecovery.finished) + 's vs ' + fmt(without.finished) + 's');
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 8. Steering feel ===\n');
+
+// These are the numbers that decide whether the car feels responsive. The
+// first tuning of this game shipped with a constant-rate return at 40 deg/s,
+// which took 1.06s to straighten up after a turn against a 0.22s turn-in — a
+// 5:1 asymmetry that played like a boat. Proportional return fixed it without
+// making the corners any easier. These assertions exist so that cannot regress
+// silently: raising returnRateDeg to chase difficulty will trip them.
+(function () {
+  var cfg = makeConfig();
+  // Straight-only track: measuring feel, not cornering.
+  cfg.track = Object.assign({}, cfg.track, { segments: [{ type: 'straight', seconds: 60 }] });
+  var track = BR.track.build(cfg);
+  var lock = cfg.turningAngleDeg * Math.PI / 180;
+
+  var car = new BR.Car(cfg, track);
+  for (var i = 0; i < 600; i++) car.update(STEP, 0);   // up to full speed
+
+  var turnIn = 0;
+  while (Math.abs(car.steerOffset) < lock - 0.002 && turnIn < 5) {
+    car.update(STEP, -1); turnIn += STEP;
+  }
+
+  var settle = 0, halfBack = null;
+  while (Math.abs(car.steerOffset) > 3 * Math.PI / 180 && settle < 10) {
+    car.update(STEP, 0); settle += STEP;
+    if (halfBack === null && Math.abs(car.steerOffset) < lock / 2) halfBack = settle;
+  }
+
+  // Lateral agility: how long to cross from the centreline to the road edge.
+  var car2 = new BR.Car(cfg, track);
+  for (i = 0; i < 600; i++) car2.update(STEP, 0);
+  var toEdge = 0;
+  while (!car2.offRoad && toEdge < 10) { car2.update(STEP, -1); toEdge += STEP; }
+
+  console.log('  turn-in to full lock        ' + turnIn.toFixed(2) + 's');
+  console.log('  half the angle back         ' + halfBack.toFixed(2) + 's');
+  console.log('  fully settled               ' + settle.toFixed(2) + 's');
+  console.log('  centre -> road edge         ' + toEdge.toFixed(2) + 's\n');
+
+  check('turn-in is prompt (< 0.25s to full lock)', turnIn < 0.25, turnIn.toFixed(2) + 's');
+  check('recovers half the angle quickly (< 0.25s)', halfBack < 0.25, halfBack.toFixed(2) + 's');
+  check('settles without feeling sluggish (< 0.85s)', settle < 0.85, settle.toFixed(2) + 's');
+  // Guards the asymmetry that caused the original complaint.
+  check('straighten is not wildly slower than turn-in (< 5x)',
+        settle < turnIn * 5, (settle / turnIn).toFixed(1) + 'x');
+})();
 
 console.log('');
 if (failures.length) {

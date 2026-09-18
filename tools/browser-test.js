@@ -69,7 +69,8 @@ function shot(page, name) {
         lateral: g.car.loc.lateral,
         s: g.car.loc.s,
         cfg: { turningAngleDeg: g.cfg.turningAngleDeg, accelerationTime: g.cfg.accelerationTime,
-               laps: g.cfg.laps, fullSpeed: g.cfg.fullSpeed },
+               laps: g.cfg.laps, fullSpeed: g.cfg.fullSpeed,
+               steerRateDeg: g.cfg.steerRateDeg, returnRateDeg: g.cfg.returnRateDeg },
         trackLength: g.track.length,
         qualifying: g.track.qualifyingTime
       };
@@ -97,26 +98,43 @@ function shot(page, name) {
       check('summary names the track and qualifying time',
             /Track 1/.test(summary) && /12\.00s/.test(summary), summary.trim());
 
-      // Move the Turning Angle slider and confirm it reaches the config.
-      return page.fill('#cfg-turning-angle', '20').then(function () {
-        return page.dispatchEvent('#cfg-turning-angle', 'input');
-      });
-    }).then(function () {
-      return page.textContent('#cfg-turning-angle-value');
-    }).then(function (text) {
-      check('slider updates its readout', text.trim() === '20°', text.trim());
-      return state();
-    }).then(function (s) {
-      check('slider updates the live config', s.cfg.turningAngleDeg === 20, 'cfg=' + s.cfg.turningAngleDeg);
+      // Every slider must reach the live config and show its own readout.
+      var sliders = [
+        { id: 'cfg-turning-angle', key: 'turningAngleDeg',  set: '20',  shows: '20\u00B0' },
+        { id: 'cfg-acceleration',  key: 'accelerationTime', set: '3',   shows: '3.0s' },
+        { id: 'cfg-laps',          key: 'laps',             set: '2',   shows: '2' },
+        { id: 'cfg-full-speed',    key: 'fullSpeed',        set: '600', shows: '600 px/s' },
+        { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '400', shows: '400\u00B0/s' },
+        { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120', shows: '120\u00B0/s' }
+      ];
 
-      // Put it back, then verify Reset restores the file defaults.
-      return page.fill('#cfg-turning-angle', '30')
-        .then(function () { return page.dispatchEvent('#cfg-turning-angle', 'input'); })
-        .then(function () { return page.click('#btn-reset'); })
-        .then(state);
+      var chain = Promise.resolve();
+      sliders.forEach(function (sl) {
+        chain = chain.then(function () {
+          return page.fill('#' + sl.id, sl.set);
+        }).then(function () {
+          return page.dispatchEvent('#' + sl.id, 'input');
+        }).then(function () {
+          return page.textContent('#' + sl.id + '-value');
+        }).then(function (text) {
+          check(sl.key + ': readout updates', text.trim() === sl.shows,
+                'showed "' + text.trim() + '"');
+          return state();
+        }).then(function (st) {
+          check(sl.key + ': reaches the live config',
+                Number(st.cfg[sl.key]) === Number(sl.set), 'cfg=' + st.cfg[sl.key]);
+        });
+      });
+      return chain;
+    }).then(function () {
+      // Reset must restore every file default, not just the last one touched.
+      return page.click('#btn-reset').then(state);
     }).then(function (s) {
-      check('"Reset to file defaults" restores the file value',
-            s.cfg.turningAngleDeg === 45, 'cfg=' + s.cfg.turningAngleDeg);
+      check('"Reset to file defaults" restores all six values',
+            s.cfg.turningAngleDeg === 45 && s.cfg.accelerationTime === 2
+              && s.cfg.laps === 1 && s.cfg.fullSpeed === 420
+              && s.cfg.steerRateDeg === 280 && s.cfg.returnRateDeg === 170,
+            JSON.stringify(s.cfg));
       return shot(page, '01-title.png');
     }).then(function () {
 

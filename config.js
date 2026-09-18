@@ -36,21 +36,29 @@ BR.DEFAULT_CONFIG = {
   fullSpeed: 420,
 
 
-  /* --- Handling tuning (file only) ---------------------------------------- */
+  /* --- Steering feel (title screen + file) --------------------------------- */
 
-  // How fast holding left/right builds up steering offset, in degrees/second.
-  steerRateDeg: 200,
+  // Steering Speed: how fast the car turns while you hold left or right, in
+  // degrees/second. At 280 the car reaches full 45 degree lock in 0.17s.
+  // Raising this only makes the car more responsive to YOUR input, so it costs
+  // nothing in difficulty — a hands-off lap is unaffected. Default 280.
+  steerRateDeg: 280,
 
-  // How fast the steering offset falls back to 0 (i.e. back to the direction
-  // of the road) once you release the keys, in degrees/second.
+  // Straighten Speed: how fast the car swings back to the direction of the
+  // road once you release the keys, in degrees/second MEASURED AT 45 DEGREES OF
+  // OFFSET. The rate is proportional to how far the car is turned (see
+  // RETURN_REFERENCE_DEG in src/car.js), so at 170 a car at full lock starts
+  // back at 170 deg/s, recovers half the angle in 0.18s and settles in 0.71s,
+  // while a nearly-straight car is barely nudged.
   //
-  // This is the single most important number in the game. The corners turn at
-  // 45deg / 0.4s = 112 deg/s, so at 40 deg/s the car CANNOT follow a corner on
-  // its own — leave the wheel alone through a bend and you run about 130px wide
-  // onto the grass, on a road whose edge is only 64px from the centre. Raise it
-  // towards 112 to make the game more forgiving; above that the corners drive
-  // themselves and there is no game left. (tools/simulate.js checks this.)
-  returnRateDeg: 40,
+  // This is the most sensitive number in the game, because it is also what
+  // decides whether the corners are a challenge. The bends turn at
+  // 45deg / 0.4s = 112 deg/s. At 170 the car still cannot follow one unaided —
+  // let go through a bend and you spend ~11s on the grass. Past roughly 190 the
+  // car tracks the corners on its own and a hands-off lap qualifies, which is
+  // no longer a game; tools/simulate.js asserts this, so if you raise it that
+  // test will tell you. Default 170.
+  returnRateDeg: 170,
 
 
   /* --- Off-road penalty (file only) --------------------------------------- */
@@ -122,5 +130,7 @@ BR.CONFIG_LIMITS = {
   turningAngleDeg:  { min: 5,   max: 90,   step: 1 },
   accelerationTime: { min: 0.2, max: 10,   step: 0.1 },
   laps:             { min: 1,   max: 20,   step: 1 },
-  fullSpeed:        { min: 120, max: 1200, step: 10 }
+  fullSpeed:        { min: 120, max: 1200, step: 10 },
+  steerRateDeg:     { min: 60,  max: 600,  step: 10 },
+  returnRateDeg:    { min: 30,  max: 400,  step: 10 }
 };

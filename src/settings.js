@@ -6,8 +6,9 @@
 
   var STORAGE_KEY = 'blockracer2.settings.v1';
 
-  // Only these four may be overridden from the title screen.
-  var OVERRIDABLE = ['turningAngleDeg', 'accelerationTime', 'laps', 'fullSpeed'];
+  // Only these may be overridden from the title screen.
+  var OVERRIDABLE = ['turningAngleDeg', 'accelerationTime', 'laps', 'fullSpeed',
+                     'steerRateDeg', 'returnRateDeg'];
 
   function clampValue(key, value) {
     var lim = BR.CONFIG_LIMITS[key];

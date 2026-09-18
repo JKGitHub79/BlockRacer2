@@ -47,13 +47,30 @@ offset = car heading − road heading at the car's position,   |offset| ≤ Turn
   "pointing the same way as this part of the track". So after a 45° left-hander
   the car settles at 45° in world terms — which is 0° relative to the road — and
   holds it. That is the behaviour the design asks for.
-* The fall-back rate (`returnRateDeg`, 40°/s) is **deliberately slower than a
-  corner turns** (45° over 0.4s = 112°/s). Let go mid-corner and the car cannot
-  follow the bend: it runs about 130px wide on a road whose edge is 64px from
-  the centre. Corners have to be driven.
+* That fall-back is **proportional**, not a fixed rate: `returnRateDeg` is the
+  speed at 45° of offset, and it scales down linearly from there. A car at full
+  lock snaps back hard; a nearly-straight car is barely nudged.
+* Even so, the car **cannot follow a corner unaided**. The bends turn at 45°
+  over 0.4s = 112°/s. Let go mid-corner and you run ~100px wide on a road whose
+  edge is 64px from the centre, and spend about 11s of a 12s lap on the grass.
+  Corners have to be driven.
 
-That last point is the whole game. `tools/simulate.js` asserts it, so it cannot
-be tuned away by accident.
+Why proportional return matters: a *constant* rate ties responsiveness to
+difficulty and you cannot have both. Fast enough to feel good (≥80°/s) and a
+hands-off car just follows the bends; slow enough to keep the corners honest
+(40°/s) and the car takes over a second to straighten up against a 0.22s
+turn-in — a 5:1 asymmetry that plays like a boat. That was the first tuning of
+this game, and it was wrong. Proportional return separates the two concerns:
+
+| | first tuning (constant 40°/s) | now (proportional 170°/s) |
+| --- | --- | --- |
+| Turn-in to full lock | 0.22s | **0.17s** |
+| Half the angle back | 0.57s | **0.18s** |
+| Fully settled | 1.06s | **0.71s** |
+| Hands-off lap | 12.4s on grass | 11.4s on grass |
+
+`tools/simulate.js` asserts both halves — the corners stay demanding *and* the
+steering stays responsive — so neither can regress by accident.
 
 Running onto the grass is not a crash — it caps you at 45% of full speed until
 you get back on the tarmac, which is usually enough to lose qualifying. After 3s
@@ -87,16 +104,25 @@ The four headline settings are on the title screen **and** in `config.js`:
 | --- | --- | --- |
 | Turning Angle | 45° | 5–90° |
 | Acceleration (time to full speed) | 2.0s | 0.2–10s |
+| Steering Speed | 280°/s | 60–600 |
+| Straighten Speed | 170°/s | 30–400 |
 | No. Laps | 1 | 1–20 |
 | Full Speed | 420 px/s | 120–1200 |
+
+**Steering Speed** is how fast the car turns while you hold a key; raising it
+only makes the car more responsive to you, so it costs nothing in difficulty.
+**Straighten Speed** is how fast it swings back when you let go — this one is a
+difficulty dial too. Past roughly 190°/s the car tracks the corners on its own
+and a hands-off lap qualifies, at which point there is no game left; the test
+suite will tell you if you cross that line.
 
 `config.js` is the source of truth. Title-screen changes are saved per-browser
 in `localStorage` and layered on top; **Reset to file defaults** discards them.
 Values are clamped on both paths, so a bad hand-edit cannot make the game
 unplayable.
 
-`config.js` also holds handling tuning (`steerRateDeg`, `returnRateDeg`), the
-off-road penalty, car and road dimensions, and the Track 1 section list itself.
+`config.js` also holds the off-road penalty and recovery, car and road
+dimensions, and the Track 1 section list itself.
 
 ## Tests
 
@@ -110,7 +136,8 @@ and runs the same fixed-step loop as the game. It checks that a clean lap
 qualifies without being a free pass, that a hands-off lap leaves the road, that
 the Turning Angle clamp holds at full lock, that acceleration reaches full speed
 in exactly the configured time, and that all this survives the extremes of every
-title-screen setting.
+title-screen setting. Section 8 pins the steering-feel numbers in the table
+above so responsiveness cannot regress.
 
 `tools/browser-test.js` loads the page in Chromium, exercises the title-screen
 sliders and the reset button, then drives a full lap with real key events and

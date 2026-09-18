@@ -19,6 +19,24 @@
 
   var TAU = Math.PI * 2;
 
+  // The return-to-road rate is PROPORTIONAL to how far the car is turned, not
+  // constant. cfg.returnRateDeg is defined as the rate at this reference
+  // offset, and the rate scales linearly from there, so a car at full lock
+  // snaps back hard while a nearly-straight car is barely nudged.
+  //
+  // This is what lets the steering feel responsive without handing the player
+  // the corners. A constant rate couples the two: fast enough to feel good
+  // (>=80 deg/s) and a hands-off car simply follows the bends; slow enough to
+  // keep the corners honest (40 deg/s) and it takes over a second to
+  // straighten up. Proportional return separates them — see the measurements
+  // in tools/simulate.js section 8.
+  var RETURN_REFERENCE_DEG = 45;
+
+  // A small constant floor so the last fraction of a degree actually closes
+  // rather than decaying asymptotically forever. Kept low enough not to affect
+  // handling (8 deg/s moves the hands-off test by ~1px).
+  var RETURN_FLOOR_DEG = 8;
+
   function wrapAngle(a) {
     a = (a + Math.PI) % TAU;
     if (a < 0) a += TAU;
@@ -71,9 +89,13 @@
     if (input !== 0) {
       this.heading += input * (cfg.steerRateDeg * Math.PI / 180) * dt;
     } else {
-      // Rotate back towards the direction of the road, at a fixed rate.
+      // Rotate back towards the direction of the road, faster the further the
+      // car is turned away from it. See RETURN_REFERENCE_DEG above.
       var diff = wrapAngle(roadHeading - this.heading);
-      var step = (cfg.returnRateDeg * Math.PI / 180) * dt;
+      var offsetDeg = Math.abs(diff) * 180 / Math.PI;
+      var rateDeg = Math.max(RETURN_FLOOR_DEG,
+                             cfg.returnRateDeg * (offsetDeg / RETURN_REFERENCE_DEG));
+      var step = (rateDeg * Math.PI / 180) * dt;
       this.heading += Math.max(-step, Math.min(step, diff));
     }
 

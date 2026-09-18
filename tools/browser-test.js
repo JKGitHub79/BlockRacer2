@@ -104,7 +104,7 @@ function shot(page, name) {
         { id: 'cfg-acceleration',  key: 'accelerationTime', set: '3',   shows: '3.0s' },
         { id: 'cfg-laps',          key: 'laps',             set: '2',   shows: '2' },
         { id: 'cfg-full-speed',    key: 'fullSpeed',        set: '600', shows: '600 px/s' },
-        { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '400', shows: '400\u00B0/s' },
+        { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '6000', shows: '6000\u00B0/s' },
         { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120', shows: '120\u00B0/s' }
       ];
 
@@ -126,6 +126,40 @@ function shot(page, name) {
         });
       });
       return chain;
+    }).then(function () {
+      // The ends of each range must be visible, and the derived hints must say
+      // what a value actually does — this is what makes the sliders trialable.
+      return page.evaluate(function () {
+        var ids = ['cfg-turning-angle', 'cfg-acceleration', 'cfg-steer-rate',
+                   'cfg-return-rate', 'cfg-laps', 'cfg-full-speed'];
+        var out = {};
+        ids.forEach(function (id) {
+          out[id] = {
+            min: (document.getElementById(id + '-min') || {}).textContent,
+            max: (document.getElementById(id + '-max') || {}).textContent,
+            hint: (document.getElementById(id + '-hint') || {}).textContent,
+            attrMax: document.getElementById(id).max
+          };
+        });
+        return out;
+      });
+    }).then(function (labels) {
+      var allLabelled = Object.keys(labels).every(function (id) {
+        return labels[id].min && labels[id].max;
+      });
+      check('every slider shows the ends of its range', allLabelled,
+            'e.g. steering ' + labels['cfg-steer-rate'].min + ' to ' + labels['cfg-steer-rate'].max);
+      check('Steering Speed range now tops out at 6000',
+            labels['cfg-steer-rate'].attrMax === '6000', labels['cfg-steer-rate'].attrMax);
+      // At 6000 deg/s full lock arrives in well under one 60Hz frame (16.7ms),
+      // which is the saturation the hint is there to make visible.
+      check('Steering Speed hint shows it saturating at the top of the range',
+            /lock in 0\.0(0|1)/.test(labels['cfg-steer-rate'].hint || ''),
+            labels['cfg-steer-rate'].hint);
+      check('Turning Angle hint reports sideways speed',
+            /px\/s across/.test(labels['cfg-turning-angle'].hint || ''),
+            labels['cfg-turning-angle'].hint);
+      return null;
     }).then(function () {
       // Reset must restore every file default, not just the last one touched.
       return page.click('#btn-reset').then(state);

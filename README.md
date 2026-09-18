@@ -104,13 +104,30 @@ The four headline settings are on the title screen **and** in `config.js`:
 | --- | --- | --- |
 | Turning Angle | 45° | 5–90° |
 | Acceleration (time to full speed) | 2.0s | 0.2–10s |
-| Steering Speed | 280°/s | 60–600 |
+| Steering Speed | 280°/s | 60–6000 |
 | Straighten Speed | 170°/s | 30–400 |
 | No. Laps | 1 | 1–20 |
 | Full Speed | 420 px/s | 120–1200 |
 
+Each slider shows the ends of its range and, where it helps, what the value
+actually does — sideways speed, time to full lock, time to straighten — so a
+value can be judged before racing.
+
 **Steering Speed** is how fast the car turns while you hold a key; raising it
 only makes the car more responsive to you, so it costs nothing in difficulty.
+**It also saturates**, well below its maximum, because the car stops turning
+once it hits the Turning Angle:
+
+| Steering Speed | to full lock | centre → road edge | max sideways speed |
+| --- | --- | --- | --- |
+| 280°/s | 0.167s | 0.292s | 297 px/s |
+| 600°/s | 0.075s | 0.250s | 297 px/s |
+| 6000°/s | 0.008s | 0.217s | 297 px/s |
+
+Ten times the steering speed buys 33ms — two frames at 60Hz. Sideways speed is
+pinned at `Full Speed × sin(Turning Angle)` in all three cases. If the car does
+not change direction hard enough, **Turning Angle** is the dial (at 90° sideways
+speed goes from 297 to 420 px/s), or **Full Speed**, which scales it directly.
 **Straighten Speed** is how fast it swings back when you let go — this one is a
 difficulty dial too. Past roughly 190°/s the car tracks the corners on its own
 and a hands-off lap qualifies, at which point there is no game left; the test

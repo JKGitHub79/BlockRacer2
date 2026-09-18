@@ -41,7 +41,20 @@ BR.DEFAULT_CONFIG = {
   // Steering Speed: how fast the car turns while you hold left or right, in
   // degrees/second. At 280 the car reaches full 45 degree lock in 0.17s.
   // Raising this only makes the car more responsive to YOUR input, so it costs
-  // nothing in difficulty — a hands-off lap is unaffected. Default 280.
+  // nothing in difficulty — a hands-off lap is unaffected.
+  //
+  // NOTE: this setting SATURATES, and well below its maximum. The car stops
+  // turning once it reaches the Turning Angle, so past roughly 600 deg/s all
+  // you are shortening is the time to reach a limit that is already reached in
+  // under a frame. Measured, at 45 degrees of lock:
+  //
+  //     280 deg/s   full lock in 0.167s   centre to road edge in 0.292s
+  //     600 deg/s   full lock in 0.075s   centre to road edge in 0.250s
+  //    6000 deg/s   full lock in 0.008s   centre to road edge in 0.217s
+  //
+  // Sideways speed is pinned at fullSpeed * sin(turningAngle) = 297 px/s in all
+  // three cases. If the car does not change direction hard enough, the dial is
+  // turningAngleDeg (or fullSpeed), not this one. Default 280.
   steerRateDeg: 280,
 
   // Straighten Speed: how fast the car swings back to the direction of the
@@ -131,6 +144,6 @@ BR.CONFIG_LIMITS = {
   accelerationTime: { min: 0.2, max: 10,   step: 0.1 },
   laps:             { min: 1,   max: 20,   step: 1 },
   fullSpeed:        { min: 120, max: 1200, step: 10 },
-  steerRateDeg:     { min: 60,  max: 600,  step: 10 },
+  steerRateDeg:     { min: 60,  max: 6000, step: 10 },
   returnRateDeg:    { min: 30,  max: 400,  step: 10 }
 };

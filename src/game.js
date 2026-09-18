@@ -116,10 +116,46 @@
       var lim = BR.CONFIG_LIMITS[key];
       el.min = lim.min; el.max = lim.max; el.step = lim.step;
       el.value = self.cfg[key];
-      var out = document.getElementById(el.id + '-value');
-      if (out) out.textContent = self.formatSetting(key, self.cfg[key]);
+
+      // The ends of the range, so the scale of each slider is visible.
+      var lo = document.getElementById(el.id + '-min');
+      var hi = document.getElementById(el.id + '-max');
+      if (lo) lo.textContent = self.formatSetting(key, lim.min);
+      if (hi) hi.textContent = self.formatSetting(key, lim.max);
+
+      self.renderValue(key, el, self.cfg[key]);
     });
     this.updateSummary();
+  };
+
+  /* Current value plus, where it helps, what that value actually does. */
+  Game.prototype.renderValue = function (key, el, value) {
+    var out = document.getElementById(el.id + '-value');
+    if (out) out.textContent = this.formatSetting(key, value);
+    var hint = document.getElementById(el.id + '-hint');
+    if (hint) hint.textContent = this.describeSetting(key, value);
+  };
+
+  /* Derived effect of a setting, so a value can be judged before racing.
+   * These are the same formulas the physics uses, so they stay honest. */
+  Game.prototype.describeSetting = function (key, value) {
+    var cfg = this.cfg;
+    switch (key) {
+      case 'turningAngleDeg':
+        // Sideways speed is what actually moves the car across the road.
+        return Math.round(cfg.fullSpeed * Math.sin(value * Math.PI / 180)) + ' px/s across';
+      case 'steerRateDeg':
+        // Saturates: the car stops turning at the Turning Angle.
+        return 'lock in ' + (cfg.turningAngleDeg / value).toFixed(3) + 's';
+      case 'returnRateDeg':
+        // Proportional return: half the angle back in (45/R) * ln2 seconds.
+        return 'half back ' + ((45 / value) * Math.LN2).toFixed(2) + 's';
+      case 'fullSpeed':
+        return Math.round(cfg.fullSpeed * Math.sin(cfg.turningAngleDeg * Math.PI / 180))
+             + ' px/s across';
+      default:
+        return '';
+    }
   };
 
   Game.prototype.formatSetting = function (key, value) {
@@ -158,9 +194,15 @@
       if (!el) return;
       el.addEventListener('input', function () {
         var value = BR.settings.clampValue(key, el.value);
-        var out = document.getElementById(el.id + '-value');
-        if (out) out.textContent = self.formatSetting(key, value);
         self.cfg[key] = value;
+        self.renderValue(key, el, value);
+        // Turning Angle and Full Speed feed each other's derived readouts.
+        if (key === 'turningAngleDeg' || key === 'fullSpeed') {
+          ['turningAngleDeg', 'steerRateDeg', 'fullSpeed'].forEach(function (other) {
+            var oel = fields[other];
+            if (oel && other !== key) self.renderValue(other, oel, self.cfg[other]);
+          });
+        }
         self.updateSummary();
       });
     });

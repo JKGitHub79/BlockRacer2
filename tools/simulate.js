@@ -32,8 +32,7 @@ var STEP = 1 / 120;
 
 function makeConfig(overrides) {
   var cfg = Object.assign({}, BR.DEFAULT_CONFIG, overrides || {});
-  cfg.roadWidth = cfg.carWidth * cfg.roadWidthInCars;
-  return cfg;
+  return BR.deriveConfig(cfg);
 }
 
 /* A proportional driver: aim at the road a short distance ahead and correct
@@ -91,8 +90,11 @@ console.log('  max lateral    ' + clean.maxLateral.toFixed(1) + ' px  (road edge
 
 check('a clean lap qualifies', clean.lapTime !== null && clean.lapTime <= qual,
       'margin ' + (clean.lapTime === null ? 'n/a' : (qual - clean.lapTime).toFixed(2) + 's'));
-check('qualifying is not a free pass (margin < 3s)',
-      clean.lapTime !== null && (qual - clean.lapTime) < 3.0);
+// Proportional, not absolute: the margin has to stay tight relative to the lap,
+// and the track has quadrupled in length since this check was first written.
+check('qualifying is not a free pass (margin < 15% of the lap)',
+      clean.lapTime !== null && (qual - clean.lapTime) < clean.lapTime * 0.15,
+      (100 * (qual - clean.lapTime) / clean.lapTime).toFixed(1) + '% slack');
 check('a clean lap stays on the road', clean.offRoadTime < 0.30);
 
 // ---------------------------------------------------------------------------
@@ -144,10 +146,14 @@ sweeps.forEach(function (entry) {
 
 // Multi-lap: the qualifying target scales with lap count.
 console.log('');
+// Proportional for the same reason as the single-lap margin above: an absolute
+// tolerance here was calibrated against an 11s lap and the track is now 40s.
 var three = makeConfig({ laps: 3 });
-check('3 laps: target scales to ' + (three.track.qualifyingTime * 3).toFixed(1) + 's',
-      Math.abs(clean.lapTime * 3 - three.track.qualifyingTime * 3) < 9.0,
-      '3 clean laps ~ ' + (clean.lapTime * 3).toFixed(2) + 's');
+var threeTarget = three.track.qualifyingTime * 3;
+var threeEstimate = clean.lapTime * 3;
+check('3 laps: the scaled target stays beatable but not free',
+      threeEstimate <= threeTarget && (threeTarget - threeEstimate) < threeTarget * 0.15,
+      '3 clean laps ~ ' + threeEstimate.toFixed(1) + 's vs ' + threeTarget.toFixed(1) + 's target');
 
 // ---------------------------------------------------------------------------
 console.log('\n=== 4. Turning Angle is respected ===\n');
@@ -312,6 +318,77 @@ console.log('\n=== 8. Steering feel ===\n');
   check('straighten is not wildly slower than turn-in (< 5x)',
         settle < turnIn * 5, (settle / turnIn).toFixed(1) + 'x');
 })();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 9. Grass slowdown ===\n');
+
+// Grass Slowdown is the percentage of speed the grass COSTS you, so the car
+// should settle at (100 - pct)% of Full Speed while off the road. Recovery is
+// disabled here so the car stays on the grass long enough to settle.
+console.log('  setting   expected   measured   km/h');
+[0, 25, 50, 75].forEach(function (pct) {
+  var cfg = makeConfig({ grassSlowdownPct: pct, offRoadResetSeconds: 0 });
+  var track = BR.track.build(cfg);
+  var car = new BR.Car(cfg, track);
+
+  var t = 0;
+  while (t < 6 && !car.offRoad) { car.update(STEP, -1); t += STEP; }   // get onto the grass
+  var onGrass = car.offRoad;
+  var settle = 0;
+  while (settle < 8) { car.update(STEP, 0); settle += STEP; }          // let speed settle
+
+  var expected = cfg.fullSpeed * (1 - pct / 100);
+  var kph = (car.speed / cfg.pixelsPerMetre) * 3.6;
+  console.log('  ' + (pct + '%').padEnd(10) + expected.toFixed(0).padEnd(11) +
+              car.speed.toFixed(0).padEnd(11) + kph.toFixed(0));
+
+  check(pct + '% slowdown holds the car to ' + expected.toFixed(0) + ' px/s on grass',
+        onGrass && Math.abs(car.speed - expected) < 2,
+        car.speed.toFixed(1) + ' px/s');
+});
+
+// The default must be the 50% the game is tuned around.
+var dflt = makeConfig();
+check('the default is a 50% slowdown',
+      dflt.grassSlowdownPct === 50 && Math.abs(dflt.offRoadSpeedFactor - 0.5) < 1e-9,
+      dflt.grassSlowdownPct + '% -> factor ' + dflt.offRoadSpeedFactor);
+
+// What the penalty is worth in lap time. A fixed proportional margin gets more
+// forgiving in absolute terms as the track grows: on the 10s version 1.2s of
+// slack meant any mistake was fatal, whereas 40s of track carries 4.3s.
+function lapWithExcursions(windows) {
+  var cfg = makeConfig();
+  var track = BR.track.build(cfg);
+  var car = new BR.Car(cfg, track);
+  var t = 0;
+  while (t < 200) {
+    var forced = windows.some(function (w) { return t > w[0] && t < w[1]; });
+    car.update(STEP, forced ? -1 : autopilot(cfg, track, car));
+    t += STEP;
+    if (car.hasFinishedLap()) return t;
+  }
+  return null;
+}
+
+var cleanLap = lapWithExcursions([]);
+var oneOff = lapWithExcursions([[6, 9]]);
+var twoOff = lapWithExcursions([[6, 9], [20, 23]]);
+var target = makeConfig().track.qualifyingTime;
+var margin = target - cleanLap;
+
+console.log('');
+console.log('  clean lap            ' + cleanLap.toFixed(2) + 's   (target ' + target.toFixed(2) + 's, margin ' + margin.toFixed(2) + 's)');
+console.log('  one 3s excursion     ' + oneOff.toFixed(2) + 's   costs ' + (oneOff - cleanLap).toFixed(2) + 's');
+console.log('  two 3s excursions    ' + twoOff.toFixed(2) + 's   costs ' + (twoOff - cleanLap).toFixed(2) + 's\n');
+
+check('an excursion costs real lap time', (oneOff - cleanLap) > 1.5,
+      (oneOff - cleanLap).toFixed(2) + 's');
+check('one excursion eats most of the qualifying margin',
+      (oneOff - cleanLap) > margin * 0.5,
+      ((oneOff - cleanLap) / margin * 100).toFixed(0) + '% of the margin');
+// One mistake on a 40s lap is survivable by design; two are not.
+check('two excursions lose qualifying', twoOff > target,
+      twoOff.toFixed(2) + 's vs ' + target.toFixed(2) + 's');
 
 console.log('');
 if (failures.length) {

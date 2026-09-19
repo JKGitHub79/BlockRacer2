@@ -165,33 +165,66 @@ off the road the car is lifted back onto the racing line at half speed
 
 ## Track 1
 
-The original layout, then the same layout again with 90° turns:
+Track 1 is a base layout, then the whole thing again with **every turn
+reversed** — a left becomes a right and vice versa:
 
-| Part 1 | | Part 2 | |
-| --- | --- | --- | --- |
-| Straight | 1s | Straight | 1s |
-| Left 45° + straight | 3s | Left 90° + straight | 3s |
-| Right 45° + straight | 3s | Right 90° + straight | 3s |
-| Left 45° + straight | 3s | Left 90° + straight | 3s |
-| | | **Qualifying time** | **22.50s** |
+| | Base | Mirror |
+| --- | --- | --- |
+| | Straight 1s | Straight 1s |
+| | Left 45° + straight 3s | **Right** 45° + straight 3s |
+| | Right 45° + straight 3s | **Left** 45° + straight 3s |
+| | Left 45° + straight 3s | **Right** 45° + straight 3s |
+| | Straight 1s | Straight 1s |
+| | Left 90° + straight 3s | **Right** 90° + straight 3s |
+| | Right 90° + straight 3s | **Left** 90° + straight 3s |
+| | Left 90° + straight 3s | **Right** 90° + straight 3s |
+| **Qualifying** | | **44.00s** |
 
-20s of track. Road is **3 lanes** — 6 car widths (192px) with two dashed
-dividers. Grass either side.
+40s of track, twelve corners. The mirror is generated from the base list in
+`config.js` rather than written out twice, so editing the base changes both
+halves. The mirrored half unwinds exactly the rotation the base half puts in,
+so the car finishes pointing the way it started, and the two halves do not
+overlap — the closest approach between distant parts of the track is 490px
+against a 192px road, which the test suite checks.
 
-Every corner has the same **214px radius**: the 90° turns take twice the arc
+Road is **3 lanes** — 6 car widths (192px) with two dashed dividers. Grass
+either side.
+
+Every corner shares the same **214px radius**: the 90° turns take twice the arc
 time (0.8s vs 0.4s) for twice the angle. That matters — a 90° turn taken in
-0.4s would have a 107px radius against a 96px half-width, leaving an 11px
-inner edge, which is a kink rather than a corner.
+0.4s would have a 107px radius against a 96px half-width, leaving an 11px inner
+edge, which is a kink rather than a corner.
 
 Sections are defined in **seconds at full speed**, not in pixels, so changing
 Full Speed makes the track physically longer and a clean lap still takes about
 the same time — it just feels faster and gives you less time to react.
 
-A clean lap is about **20.3s**, so qualifying leaves roughly 2.2s of slack —
-the same ~11% margin the shorter version had. One trip onto the grass costs
-more than that.
+A clean lap is about **39.7s** (the racing line cuts inside the centreline on
+twelve corners, so it beats the 40s the centreline would take), leaving ~11%
+slack — the same proportional margin every earlier version had.
 
-## Configuration
+## Going off the road
+
+Grass holds the car to **Grass Slowdown** percent below Full Speed — 50% by
+default, so 58 km/h against 116 on tarmac. After 3s off the road the car is
+lifted back onto the racing line at half speed (`offRoadResetSeconds`, 0
+disables); see *Notes* for why.
+
+What that is worth in lap time, measured:
+
+| | Lap | Cost |
+| --- | --- | --- |
+| Clean | 39.70s | — |
+| One 3s excursion | 42.23s | 2.53s |
+| Two 3s excursions | 44.53s | 4.83s |
+
+Against a 44.00s target and a 4.30s margin, **one mistake survives and two do
+not**. Note this is softer than the original 10s track, where 1.2s of slack
+made any mistake fatal: a fixed proportional margin buys more absolute room as
+the track grows. If you want one excursion to end the run, drop
+`qualifyingTime` to about 42s.
+
+## Configuration## Configuration
 
 The four headline settings are on the title screen **and** in `config.js`:
 
@@ -201,6 +234,7 @@ The four headline settings are on the title screen **and** in `config.js`:
 | Acceleration (time to full speed) | 2.0s | 0.2–10s |
 | Steering Speed | 280°/s | 60–6000 |
 | Straighten Speed | 170°/s | 30–400 |
+| Grass Slowdown | 50% | 0–90% |
 | No. Laps | 1 | 1–20 |
 | Full Speed | 420 px/s | 120–1200 |
 
@@ -233,8 +267,15 @@ in `localStorage` and layered on top; **Reset to file defaults** discards them.
 Values are clamped on both paths, so a bad hand-edit cannot make the game
 unplayable.
 
-`config.js` also holds the off-road penalty and recovery, car and road
-dimensions, and the Track 1 section list itself.
+**Grass Slowdown** is the speed the grass costs you, so 50% holds the car to
+half of Full Speed. At 0 the grass costs nothing and the road edges stop
+mattering, which removes the only penalty for missing a corner. The physics use
+the surviving fraction; `BR.deriveConfig` works that out, and everything that
+builds a config — the title screen, saved settings and the headless harness —
+goes through it, so they cannot drift apart.
+
+`config.js` also holds the off-road recovery, car and road dimensions, the
+visual tuning, and the Track 1 section list itself.
 
 ## Tests
 
@@ -265,7 +306,7 @@ takes the same time as one on a desktop.
 * **Multi-lap is a soft target.** Track 1 is point-to-point, so laps after the
   first restart the car at the start line carrying its speed. Those rolling-start
   laps are about 1s quicker than the standing-start first lap, while the
-  qualifying target is a flat `12s × laps`. Setting laps above 1 therefore gets
+  qualifying target is a flat `44s × laps`. Setting laps above 1 therefore gets
   easier, not harder. A closed circuit in a later stage would fix this properly.
 * **Off-road recovery is an addition to the brief**, which has no crash or
   recovery rule. It is a playability feature rather than a safety net: because

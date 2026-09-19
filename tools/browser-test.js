@@ -65,7 +65,9 @@ function gameState(page) {
       cfg: {
         turningAngleDeg: g.cfg.turningAngleDeg, accelerationTime: g.cfg.accelerationTime,
         laps: g.cfg.laps, fullSpeed: g.cfg.fullSpeed,
-        steerRateDeg: g.cfg.steerRateDeg, returnRateDeg: g.cfg.returnRateDeg
+        steerRateDeg: g.cfg.steerRateDeg, returnRateDeg: g.cfg.returnRateDeg,
+        grassSlowdownPct: g.cfg.grassSlowdownPct,
+        offRoadSpeedFactor: g.cfg.offRoadSpeedFactor
       },
       view: {
         w: vp.w, h: vp.h, dpr: vp.dpr, scale: vp.scale, ui: vp.ui, touch: vp.touch,
@@ -165,7 +167,8 @@ function sectionTitleAndRace() {
       { id: 'cfg-laps',          key: 'laps',             set: '2',    shows: '2' },
       { id: 'cfg-full-speed',    key: 'fullSpeed',        set: '600',  shows: '600 px/s' },
       { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '6000', shows: '6000°/s' },
-      { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120',  shows: '120°/s' }
+      { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120',  shows: '120°/s' },
+      { id: 'cfg-grass-slowdown', key: 'grassSlowdownPct', set: '75',   shows: '75%' }
     ];
 
     var chain = Promise.resolve();
@@ -188,7 +191,8 @@ function sectionTitleAndRace() {
   }).then(function () {
     return page.evaluate(function () {
       var ids = ['cfg-turning-angle', 'cfg-acceleration', 'cfg-steer-rate',
-                 'cfg-return-rate', 'cfg-laps', 'cfg-full-speed'];
+                 'cfg-return-rate', 'cfg-laps', 'cfg-full-speed',
+                 'cfg-grass-slowdown'];
       var out = {};
       ids.forEach(function (id) {
         out[id] = {
@@ -212,13 +216,29 @@ function sectionTitleAndRace() {
     check('Turning Angle hint reports sideways speed',
           /px\/s across/.test(labels['cfg-turning-angle'].hint || ''),
           labels['cfg-turning-angle'].hint);
+    check('Grass Slowdown hint reports the resulting speed',
+          /km\/h on grass/.test(labels['cfg-grass-slowdown'].hint || ''),
+          labels['cfg-grass-slowdown'].hint);
+    // Derived values must track the sliders LIVE, not only once a race starts.
+    // This caught offRoadSpeedFactor sitting stale at 0.5 while the slider
+    // read 75%, which startRace() happened to paper over by reloading.
+    return gameState(page);
+  }).then(function (s) {
+    check('derived physics values track the sliders live',
+          Math.abs(s.cfg.offRoadSpeedFactor - (1 - s.cfg.grassSlowdownPct / 100)) < 1e-9,
+          s.cfg.grassSlowdownPct + '% -> factor ' + s.cfg.offRoadSpeedFactor);
     return page.click('#btn-reset').then(function () { return gameState(page); });
   }).then(function (s) {
-    check('"Reset to file defaults" restores all six values',
+    check('"Reset to file defaults" restores all seven values',
           s.cfg.turningAngleDeg === 45 && s.cfg.accelerationTime === 2 &&
           s.cfg.laps === 1 && s.cfg.fullSpeed === 420 &&
-          s.cfg.steerRateDeg === 280 && s.cfg.returnRateDeg === 170,
+          s.cfg.steerRateDeg === 280 && s.cfg.returnRateDeg === 170 &&
+          s.cfg.grassSlowdownPct === 50,
           JSON.stringify(s.cfg));
+    // The physics value has to follow the title-screen percentage.
+    check('Grass Slowdown drives the physics factor',
+          Math.abs(s.cfg.offRoadSpeedFactor - 0.5) < 1e-9,
+          '50% -> factor ' + s.cfg.offRoadSpeedFactor);
     return shot(page, '01-title.png');
   }).then(function () {
     console.log('\n=== Race ===\n');

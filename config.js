@@ -74,10 +74,16 @@ BR.DEFAULT_CONFIG = {
   returnRateDeg: 170,
 
 
-  /* --- Off-road penalty (file only) --------------------------------------- */
+  /* --- Off-road penalty (title screen + file) ------------------------------ */
 
-  // Top speed on grass, as a fraction of Full Speed.
-  offRoadSpeedFactor: 0.45,
+  // Grass Slowdown: how much speed the grass costs you, as a percentage. At 50
+  // the car is held to half of Full Speed while off the road — 58 km/h against
+  // 116 on tarmac. The physics use the surviving fraction
+  // (offRoadSpeedFactor), which BR.deriveConfig works out from this.
+  //
+  // At 0 the grass costs nothing and the road edges stop mattering, which
+  // removes the only penalty for missing a corner.
+  grassSlowdownPct: 50,
 
   // How hard the grass scrubs off speed, as a multiple of normal acceleration.
   offRoadBrakeFactor: 2.5,
@@ -149,46 +155,58 @@ BR.DEFAULT_CONFIG = {
   //   { type: 'straight', seconds }
   //   { type: 'turn', dir: -1 (left) | +1 (right), degrees, seconds }
   //
-  // Track 1 is the original layout followed by the same layout again with 90
-  // degree turns instead of 45:
+  // Track 1 is built from a base layout, then the whole thing again with every
+  // turn reversed — a left becomes a right and vice versa:
   //
-  //   Part 1  straight 1s | L45 + straight 3s | R45 + straight 3s | L45 + straight 3s
-  //   Part 2  straight 1s | L90 + straight 3s | R90 + straight 3s | L90 + straight 3s
+  //   Base   straight 1s | L45 + 3s | R45 + 3s | L45 + 3s
+  //          straight 1s | L90 + 3s | R90 + 3s | L90 + 3s
+  //   Mirror straight 1s | R45 + 3s | L45 + 3s | R45 + 3s
+  //          straight 1s | R90 + 3s | L90 + 3s | R90 + 3s
   //
-  // = 20s of track. Every corner has the same 214px radius: the 90 degree
-  // turns take twice the arc time (0.8s vs 0.4s) for twice the angle, which
-  // keeps the road from kinking. At 0.4s a 90 degree turn would have a 107px
-  // radius against a 96px half-width, leaving an 11px inner edge — undrivable.
+  // = 40s of track. The mirrored half unwinds exactly the rotation the base
+  // half puts in, so the car finishes pointing the way it started.
+  //
+  // Every corner shares the same 214px radius: the 90 degree turns take twice
+  // the arc time (0.8s vs 0.4s) for twice the angle. Taken in 0.4s a 90 degree
+  // turn would have a 107px radius against a 96px half-width, leaving an 11px
+  // inner edge — a kink, not a corner.
   track: {
     name: 'Track 1',
-    // A clean lap is ~20.3s, so this leaves ~11% slack — the same proportional
-    // margin the 10s version had at 12.0s against a 10.8s lap.
-    qualifyingTime: 22.5,  // seconds, PER LAP
-    segments: [
-      /* --- Part 1: 45 degree turns --- */
-      { type: 'straight', seconds: 1.0 },
 
-      { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
-      { type: 'straight', seconds: 2.6 },
+    // A clean lap is ~39.7s (the racing line cuts inside the centreline on
+    // twelve corners, so it beats the 40s the centreline would take), leaving
+    // ~11% slack — the same proportional margin every earlier version had.
+    qualifyingTime: 44.0,  // seconds, PER LAP
 
-      { type: 'turn', dir: +1, degrees: 45, seconds: 0.4 },
-      { type: 'straight', seconds: 2.6 },
+    segments: (function () {
+      var base = [
+        /* --- 45 degree turns --- */
+        { type: 'straight', seconds: 1.0 },
+        { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
+        { type: 'straight', seconds: 2.6 },
+        { type: 'turn', dir: +1, degrees: 45, seconds: 0.4 },
+        { type: 'straight', seconds: 2.6 },
+        { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
+        { type: 'straight', seconds: 2.6 },
 
-      { type: 'turn', dir: -1, degrees: 45, seconds: 0.4 },
-      { type: 'straight', seconds: 2.6 },
+        /* --- the same layout with 90 degree turns --- */
+        { type: 'straight', seconds: 1.0 },
+        { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
+        { type: 'straight', seconds: 2.2 },
+        { type: 'turn', dir: +1, degrees: 90, seconds: 0.8 },
+        { type: 'straight', seconds: 2.2 },
+        { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
+        { type: 'straight', seconds: 2.2 }
+      ];
 
-      /* --- Part 2: the same layout with 90 degree turns --- */
-      { type: 'straight', seconds: 1.0 },
+      // The same sections again, every turn flipped left-for-right.
+      var mirrored = base.map(function (seg) {
+        if (seg.type !== 'turn') return { type: 'straight', seconds: seg.seconds };
+        return { type: 'turn', dir: -seg.dir, degrees: seg.degrees, seconds: seg.seconds };
+      });
 
-      { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
-      { type: 'straight', seconds: 2.2 },
-
-      { type: 'turn', dir: +1, degrees: 90, seconds: 0.8 },
-      { type: 'straight', seconds: 2.2 },
-
-      { type: 'turn', dir: -1, degrees: 90, seconds: 0.8 },
-      { type: 'straight', seconds: 2.2 }
-    ]
+      return base.concat(mirrored);
+    })()
   }
 };
 
@@ -199,5 +217,16 @@ BR.CONFIG_LIMITS = {
   laps:             { min: 1,   max: 20,   step: 1 },
   fullSpeed:        { min: 120, max: 1200, step: 10 },
   steerRateDeg:     { min: 60,  max: 6000, step: 10 },
-  returnRateDeg:    { min: 30,  max: 400,  step: 10 }
+  returnRateDeg:    { min: 30,  max: 400,  step: 10 },
+  grassSlowdownPct: { min: 0,   max: 90,   step: 5 }
+};
+
+/* Values worked out from the settings above rather than set directly.
+ * Everything that builds a config — the title screen, the saved settings and
+ * the headless harness — goes through here, so they cannot drift apart. */
+BR.deriveConfig = function (cfg) {
+  cfg.roadWidth = cfg.carWidth * cfg.roadWidthInCars;
+  // Grass Slowdown is the speed you LOSE; the physics want what survives.
+  cfg.offRoadSpeedFactor = 1 - (cfg.grassSlowdownPct / 100);
+  return cfg;
 };

@@ -8,7 +8,7 @@
 
   // Only these may be overridden from the title screen.
   var OVERRIDABLE = ['turningAngleDeg', 'accelerationTime', 'laps', 'fullSpeed',
-                     'steerRateDeg', 'returnRateDeg'];
+                     'steerRateDeg', 'returnRateDeg', 'grassSlowdownPct'];
 
   function clampValue(key, value) {
     var lim = BR.CONFIG_LIMITS[key];
@@ -56,8 +56,7 @@
     var overrides = readOverrides();
     Object.keys(overrides).forEach(function (key) { cfg[key] = overrides[key]; });
 
-    cfg.roadWidth = cfg.carWidth * cfg.roadWidthInCars;
-    return cfg;
+    return BR.deriveConfig(cfg);
   }
 
   function save(values) {

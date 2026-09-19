@@ -206,7 +206,8 @@
       laps:             document.getElementById('cfg-laps'),
       fullSpeed:        document.getElementById('cfg-full-speed'),
       steerRateDeg:     document.getElementById('cfg-steer-rate'),
-      returnRateDeg:    document.getElementById('cfg-return-rate')
+      returnRateDeg:    document.getElementById('cfg-return-rate'),
+      grassSlowdownPct: document.getElementById('cfg-grass-slowdown')
     };
   };
 
@@ -256,6 +257,11 @@
       case 'fullSpeed':
         return Math.round(cfg.fullSpeed * Math.sin(cfg.turningAngleDeg * Math.PI / 180))
              + ' px/s across';
+      case 'grassSlowdownPct':
+        // What the penalty actually leaves you with, in the same units as the
+        // in-race speed readout.
+        return Math.round((cfg.fullSpeed * (1 - value / 100) / cfg.pixelsPerMetre) * 3.6)
+             + ' km/h on grass';
       default:
         return '';
     }
@@ -266,6 +272,7 @@
     if (key === 'accelerationTime') return Number(value).toFixed(1) + 's';
     if (key === 'fullSpeed') return value + ' px/s';
     if (key === 'steerRateDeg' || key === 'returnRateDeg') return value + '\u00B0/s';
+    if (key === 'grassSlowdownPct') return value + '%';
     return String(value);
   };
 
@@ -298,10 +305,15 @@
       el.addEventListener('input', function () {
         var value = BR.settings.clampValue(key, el.value);
         self.cfg[key] = value;
+        // Keep the derived values in step. Without this the live config is
+        // inconsistent while the title screen is open — Grass Slowdown would
+        // read 75% with offRoadSpeedFactor still at 0.5 — and only came right
+        // because startRace() reloads the settings from scratch.
+        BR.deriveConfig(self.cfg);
         self.renderValue(key, el, value);
         // Turning Angle and Full Speed feed each other's derived readouts.
         if (key === 'turningAngleDeg' || key === 'fullSpeed') {
-          ['turningAngleDeg', 'steerRateDeg', 'fullSpeed'].forEach(function (other) {
+          ['turningAngleDeg', 'steerRateDeg', 'fullSpeed', 'grassSlowdownPct'].forEach(function (other) {
             var oel = fields[other];
             if (oel && other !== key) self.renderValue(other, oel, self.cfg[other]);
           });

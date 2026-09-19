@@ -296,7 +296,17 @@ function sectionResolutions(cfgViewMinWorld) {
         check(size.name + ': "Start Race" reachable without scrolling', startVisible);
         return page.click('#btn-start');
       }).then(function () {
-        return page.waitForTimeout(4200);        // countdown plus a little racing
+        return page.waitForTimeout(1000);        // still counting down: speed 0
+      }).then(function () {
+        return gameState(page);
+      }).then(function (still) {
+        // Stationary is the tightest the camera ever gets, so this is where
+        // the guarantee has to be exact.
+        var sw = Math.min(still.view.worldW, still.view.worldH);
+        check(size.name + ': stationary view is exactly the guaranteed extent',
+              still.speed === 0 && Math.abs(sw - cfgViewMinWorld) < 1.5,
+              sw.toFixed(0) + ' vs ' + cfgViewMinWorld);
+        return page.waitForTimeout(3400);        // now racing, at speed
       }).then(function () {
         return shot(page, 'res-' + size.name + '.png');
       }).then(function () {
@@ -308,10 +318,10 @@ function sectionResolutions(cfgViewMinWorld) {
                     (Math.round(v.worldW) + 'x' + Math.round(v.worldH)).padEnd(16) +
                     v.ui.toFixed(2));
 
-        // The fairness invariant: no screen sees less world than any other.
+        // At speed the camera pulls back, so the view may only ever be wider.
         var shortWorld = Math.min(v.worldW, v.worldH);
-        check(size.name + ': shows the guaranteed world extent',
-              Math.abs(shortWorld - cfgViewMinWorld) < 1.5,
+        check(size.name + ': at speed the view never tightens below the guarantee',
+              shortWorld >= cfgViewMinWorld - 1.5,
               shortWorld.toFixed(0) + ' vs ' + cfgViewMinWorld);
         check(size.name + ': backing store matches CSS size x dpr',
               v.backingW === Math.round(v.w * v.dpr) && v.backingH === Math.round(v.h * v.dpr));
@@ -324,6 +334,77 @@ function sectionResolutions(cfgViewMinWorld) {
     });
   });
   return chain;
+}
+
+// ======================================================== 3b. sense of speed ==
+
+/* The complaint this guards against: on a long straight it was not clear the
+ * car was moving at all. Optic flow is measurable — how much of the screen
+ * actually changes from frame to frame — so measure it rather than guess.
+ * Before this work it was 3.1% of pixels at Full Speed, which is why the road
+ * read as static. */
+function sectionSenseOfSpeed() {
+  console.log('\n=== Sense of speed ===\n');
+  var page;
+
+  function flow(ms) {
+    return page.evaluate(function (wait) {
+      var c = document.getElementById('game');
+      var ctx = c.getContext('2d');
+      function grab() { return ctx.getImageData(0, 0, c.width, c.height).data; }
+      var a = grab();
+      return new Promise(function (res) {
+        setTimeout(function () {
+          var b = grab(), moved = 0, sum = 0, n = 0;
+          for (var i = 0; i < a.length; i += 4) {
+            var d = (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) +
+                     Math.abs(a[i + 2] - b[i + 2])) / 3;
+            sum += d; if (d > 8) moved++; n++;
+          }
+          res({ movedPct: 100 * moved / n, meanDiff: sum / n });
+        }, wait);
+      });
+    }, ms);
+  }
+
+  function driveTo(sMin) {
+    function tick(i) {
+      if (i > 2500) return Promise.resolve(false);
+      return gameState(page).then(function (st) {
+        if (st.phase === 'racing' && st.s > sMin && st.speed >= st.cfg.fullSpeed - 1) {
+          return true;
+        }
+        return page.waitForTimeout(16).then(function () { return tick(i + 1); });
+      });
+    }
+    return tick(0);
+  }
+
+  return newPage({ w: 1000, h: 680 }).then(function (p) {
+    page = p;
+    return page.click('#btn-start');
+  }).then(function () {
+    return driveTo(2600);                       // a long straight, at full speed
+  }).then(function (reached) {
+    check('reached a straight at full speed', reached);
+    return flow(80);
+  }).then(function (f) {
+    console.log('  on a straight at full speed, over ~80ms:');
+    console.log('    pixels visibly moving  ' + f.movedPct.toFixed(1) + '%');
+    console.log('    mean pixel change      ' + f.meanDiff.toFixed(2) + ' / 255\n');
+    check('the screen visibly moves on a straight', f.movedPct > 15,
+          f.movedPct.toFixed(1) + '% of pixels (was 3.1% before)');
+    check('mean pixel change is substantial', f.meanDiff > 3,
+          f.meanDiff.toFixed(2) + ' / 255');
+    return gameState(page);
+  }).then(function (fast) {
+    // The camera must be wider at speed than it was standing still.
+    check('the camera pulls back with speed',
+          fast.view.worldW > 960 * 1.05,
+          Math.round(fast.view.worldW) + ' world px wide at speed vs 960 at rest');
+    check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+    return page.close();
+  });
 }
 
 // ================================================================ 4. touch ==
@@ -448,6 +529,8 @@ chromium.launch().then(function (b) {
 }).then(function (lap) {
   desktopLap = lap;
   return sectionResolutions(viewMinWorld);
+}).then(function () {
+  return sectionSenseOfSpeed();
 }).then(function () {
   return sectionTouch();
 }).then(function () {

@@ -35,6 +35,46 @@ touch screen, faint arrows mark the two steering halves while racing; sliding a
 finger across the middle switches sides without lifting it, and multi-touch is
 handled so holding one side and tapping the other behaves.
 
+## Sense of speed
+
+The car sits at a fixed point on screen, so everything telling you that you are
+moving is in the scenery. That has to be built deliberately, and it is
+measurable: how much of the screen actually changes from frame to frame.
+
+Measured on a straight at Full Speed, over ~80ms:
+
+| | pixels visibly changing | mean pixel change |
+| --- | --- | --- |
+| Before | 3.1% | 1.20 / 255 |
+| After | **29.2%** | **6.99 / 255** |
+
+At 3% the road genuinely read as static. Four things were wrong, all fixed:
+
+* **The grass was nearly flat.** It covers most of the screen, and its two
+  tones differed by about 5% — invisible at speed. It now has real contrast,
+  many more tufts, several tones and broad patches underneath. The texture is
+  isotropic on purpose: banding gives no cue when travelling along the bands,
+  and this track runs in every direction. The tile wraps properly at its edges,
+  so the repeat does not show as a grid.
+* **Nothing marked the roadside.** The white edge line is continuous, and a
+  continuous line looks identical however fast it moves. There are now marker
+  posts down both verges (`markerSpacing`, 120px — about 3.5 a second flicking
+  past at Full Speed), with alternating bands so consecutive posts differ as
+  well as recur.
+* **The road surface was flat colour**, in the middle of the screen where you
+  are actually looking. It now has a low-contrast asphalt grain.
+* **The camera never reacted to speed**, so 33% and 100% looked alike bar how
+  fast things slid past. It now pulls back as the car speeds up (`speedZoom`,
+  18% wider flat out). The zoom only ever *widens* the view, so the guarantee
+  below still holds — the tightest the camera ever gets is a standing start.
+
+The HUD also shows a real speed in km/h rather than a percentage of an abstract
+maximum (`pixelsPerMetre` sets the conversion; the car is 56px long and a real
+hatchback is about 4.3m).
+
+`tools/browser-test.js` measures the optic flow and fails below 15%, so this
+cannot quietly regress.
+
 ## Screens and resolutions
 
 The game fills whatever screen it is on — phone, tablet or desktop, portrait or
@@ -49,7 +89,10 @@ scale is set from the **shorter screen axis** against a fixed world extent
 direction; larger or wider ones see more, never less. Physics are in absolute
 world units and never consult the viewport, so lap times match across devices —
 the test suite drives a full lap on a phone and on a desktop and compares them
-(they land 0.02s apart).
+(they land within 0.02s of each other). The speed zoom above is applied on top
+of this and only ever widens the view, so the stationary camera is the tightest
+it ever gets — the suite checks the extent is exact at a standstill and never
+below the guarantee at speed.
 
 | | CSS size | Backing store | World visible |
 | --- | --- | --- | --- |
@@ -211,9 +254,9 @@ above so responsiveness cannot regress.
 `tools/browser-test.js` loads the page in Chromium and covers the title-screen
 sliders, range labels and reset button; a full lap driven with real key events;
 layout and world scale across six resolutions from a 320px phone to an
-ultrawide; touch steering on a phone viewport (including that it never scrolls
-or zooms the page); and that a lap on a phone takes the same time as one on a
-desktop.
+ultrawide; the optic flow on a straight; touch steering on a phone viewport
+(including that it never scrolls or zooms the page); and that a lap on a phone
+takes the same time as one on a desktop.
 
 ## Notes and known limitations
 

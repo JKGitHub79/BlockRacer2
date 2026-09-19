@@ -116,6 +116,25 @@ BR.DEFAULT_CONFIG = {
   // taller screen turns that same framing into more visible road ahead.
   lookAhead: 0.19,
 
+  // How much the camera pulls back at Full Speed, as a fraction. 0.18 means
+  // 18% more world is visible flat out than standing still, so accelerating
+  // reads as the view opening out. Set to 0 for a fixed camera.
+  //
+  // The zoom only ever widens the view, never tightens it, so the guarantee
+  // that every screen sees at least viewMinWorld still holds — the tightest
+  // the camera ever gets is a standing start.
+  speedZoom: 0.18,
+
+  // World pixels per metre, used only for the km/h readout. The car is 56px
+  // long and a real hatchback is about 4.3m, so ~13 px/m. At Full Speed 420
+  // px/s that reads as 116 km/h.
+  pixelsPerMetre: 13,
+
+  // Spacing between the roadside marker posts, in world pixels. At Full Speed
+  // 120px means about 3.5 posts a second flicking past on each side, which is
+  // the clearest single cue that the car is moving. Raise to thin them out.
+  markerSpacing: 120,
+
   // The world extent, in world pixels, guaranteed visible along the SHORTER
   // screen axis. This is what makes the game fair across displays: every
   // screen sees at least this much track in every direction, so the qualifying

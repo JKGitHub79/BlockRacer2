@@ -23,7 +23,8 @@
     this.w = 1;
     this.h = 1;
     this.dpr = 1;
-    this.scale = 1;
+    this.scale = 1;      // base, speed-independent
+    this.zoom = 1;       // >= 1, widens the view as the car speeds up
     this.ui = 1;
     this.touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
     this.measure();
@@ -57,9 +58,22 @@
     return changed;
   };
 
+  /* The scale actually used to draw, once the speed zoom is applied.
+   *
+   * `zoom` is always >= 1, so the speed zoom can only ever widen the view. That
+   * keeps the fairness guarantee intact: the tightest the camera ever gets is
+   * standing still, where exactly cfg.viewMinWorld is visible on the short
+   * axis. Moving, the player sees more, never less. */
+  Viewport.prototype.effectiveScale = function () { return this.scale / this.zoom; };
+
+  /* Sets the speed zoom from a 0..1 fraction of full speed. */
+  Viewport.prototype.setSpeedZoom = function (frac, amount) {
+    this.zoom = 1 + (amount || 0) * Math.max(0, Math.min(1, frac));
+  };
+
   /* Visible world extent, in world units. */
-  Viewport.prototype.worldWidth = function () { return this.w / this.scale; };
-  Viewport.prototype.worldHeight = function () { return this.h / this.scale; };
+  Viewport.prototype.worldWidth = function () { return this.w / this.effectiveScale(); };
+  Viewport.prototype.worldHeight = function () { return this.h / this.effectiveScale(); };
 
   /* True when the screen is meaningfully taller than it is wide, which is
    * where the HUD needs to reflow. */

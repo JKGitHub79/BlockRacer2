@@ -117,11 +117,12 @@
     ctx.font = font(11 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.fillText('SPEED', pad + 11 * u, by + 7 * u);
+    // An actual speed, not just a percentage of an abstract maximum.
+    var kph = (state.car.speed / cfg.pixelsPerMetre) * 3.6;
     ctx.textAlign = 'right';
-    ctx.font = font(14 * u, true);
+    ctx.font = font(16 * u, true);
     ctx.fillStyle = state.car.offRoad ? '#ffcf5c' : '#ffffff';
-    ctx.fillText(Math.round((state.car.speed / cfg.fullSpeed) * 100) + '%',
-                 pad + bw - 11 * u, by + 5 * u);
+    ctx.fillText(Math.round(kph) + ' km/h', pad + bw - 11 * u, by + 3 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fillRect(pad + 11 * u, by + bh - 15 * u, bw - 22 * u, 7 * u);
     ctx.fillStyle = state.car.offRoad ? '#ffcf5c' : '#7ec8f2';

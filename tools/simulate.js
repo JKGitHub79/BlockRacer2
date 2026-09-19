@@ -490,11 +490,66 @@ console.log('  cars   placed   off-road   overlapping   avg pace   closest');
   var r = runField(40, 0.1);
   var speeds = r.field.map(function (c) { return c.cfg.fullSpeed; });
   var lo = Math.min.apply(null, speeds), hi = Math.max.apply(null, speeds);
+  // The spread is deliberately narrower than it was (0.82-0.96, not
+  // 0.72-0.96) so the chase lasts; this only guards against the field all
+  // running at one speed.
   check('the field has a spread of top speeds',
-        hi - lo > r.cfg.fullSpeed * 0.15,
+        hi - lo > r.cfg.fullSpeed * 0.10,
         lo.toFixed(0) + '-' + hi.toFixed(0) + ' px/s vs the player\'s ' + r.cfg.fullSpeed);
   check('no AI car is faster than the player',
         hi <= r.cfg.fullSpeed, 'quickest ' + hi.toFixed(0) + ' px/s');
+})();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 11. The chase ===\n');
+
+/* The field has to get away off the line and take most of the lap to reel in.
+ * Before the AI were given their own acceleration and a tighter speed spread,
+ * a clean player led a 12-car field outright by 10s of a 40s lap — the race
+ * was over in a quarter of the distance. */
+(function () {
+  var cfg = makeConfig();
+  var track = BR.track.build(cfg);
+  var field = BR.ai.buildField(cfg, track);
+  var player = new BR.Car(cfg, track);
+
+  var t = 0, leadAt = null, lastAt2s = null, gapAt2s = null;
+  var positions = [];
+
+  while (t < 120) {
+    BR.ai.updateField(field, track, STEP);
+    player.update(STEP, autopilot(cfg, track, player));
+    t += STEP;
+
+    var pos = BR.ai.playerPosition(field, player.loc.s);
+    if (leadAt === null && pos === 1) leadAt = t;
+    if (lastAt2s === null && t >= 2.0) {
+      lastAt2s = pos;
+      var ss = field.map(function (c) { return c.loc.s; });
+      gapAt2s = Math.max.apply(null, ss) - player.loc.s;
+    }
+    if (Math.round(t / STEP) % 600 === 0) positions.push(pos);
+    if (player.hasFinishedLap()) break;
+  }
+
+  var passed = field.filter(function (c) { return c.loc.s < player.loc.s; }).length;
+  var leadFrac = leadAt === null ? 1 : leadAt / t;
+
+  console.log('  field size           ' + field.length);
+  console.log('  position at 2s       P' + lastAt2s + ', leader ' + gapAt2s.toFixed(0) + 'px up the road');
+  console.log('  took the lead at     ' + (leadAt === null ? 'never' : leadAt.toFixed(1) + 's')
+            + '  (' + (leadFrac * 100).toFixed(0) + '% into the lap)');
+  console.log('  position every 5s    ' + positions.map(function (p) { return 'P' + p; }).join(' ') + '\n');
+
+  check('the field gets away off the line',
+        lastAt2s === field.length + 1 && gapAt2s > 300,
+        'still P' + lastAt2s + ' at 2s, leader ' + gapAt2s.toFixed(0) + 'px ahead');
+  check('the player does not lead in the first third of the lap',
+        leadFrac > 0.33, 'led from ' + (leadFrac * 100).toFixed(0) + '%');
+  check('but the field is catchable with a clean lap',
+        leadAt !== null, leadAt === null ? 'never caught them' : 'led from ' + leadAt.toFixed(1) + 's');
+  check('the player works through the whole field',
+        passed === field.length, passed + ' of ' + field.length + ' passed');
 })();
 
 console.log('');

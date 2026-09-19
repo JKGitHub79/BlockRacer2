@@ -80,11 +80,26 @@ BR.DEFAULT_CONFIG = {
   // player and each gets its own top speed and lane.
   aiCars: 12,
 
-  // Their top speeds, as fractions of Full Speed, spread evenly across the
-  // field. Deliberately below 1: a clean lap should carry you through the
-  // field, while time lost on the grass hands places back.
-  aiSpeedMin: 0.72,
+  // Their top speeds, as fractions of Full Speed, spread across the field.
+  // Deliberately just below 1, so a clean lap reels the field in over most of
+  // the distance rather than in the first few seconds, while time lost on the
+  // grass hands places straight back.
+  //
+  // The spread sets how long the chase lasts. At 0.72-0.96 the player closed
+  // on the average car at ~70px/s and led a 12-car field outright by 10s of a
+  // 40s lap. The quickest AI must stay reachable though: a car this much
+  // slower closes at (1 - aiSpeedMax) x Full Speed, so at 0.96 the player
+  // gains ~17px/s and is still second at 20s of a 40s lap, taking the lead
+  // around 30s. Raise it towards 1.0 to stretch the chase further; past about
+  // 0.98 the leaders stop being catchable at all within a lap.
+  aiSpeedMin: 0.82,
   aiSpeedMax: 0.96,
+
+  // Seconds the AI take to reach their own top speed. Well under the player's
+  // Acceleration on purpose: the field launches off the line and is gone while
+  // the player is still winding up, which is what makes it a chase rather than
+  // a procession. Lower for a more dramatic getaway.
+  aiAccelerationTime: 0.7,
 
   // Fixed seed, so a given car count always produces the same field and lap
   // times stay reproducible.

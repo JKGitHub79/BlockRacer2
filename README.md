@@ -5,7 +5,8 @@ the only thing you control is the wheel. Beat the qualifying time.
 
 ![Track 1](docs/racing.png)
 
-<img src="docs/grid.png" alt="Starting grid" width="420">
+<img src="docs/grid.png" alt="Starting grid" width="330">
+<img src="docs/chase.png" alt="The field gets away" width="330">
 <img src="docs/mobile.png" alt="Phone portrait" width="200">
 
 ## Running it
@@ -212,10 +213,32 @@ same physics as the player: same `Car`, same steering model, same Turning Angle
 clamp, same grass penalty. What differs is the driver, a proportional
 controller aiming at the road ahead and correcting onto its own lane.
 
-Each car gets its own top speed, spread evenly between `aiSpeedMin` and
-`aiSpeedMax` (0.72–0.96 of Full Speed) from a fixed seed, so the field strings
-out, a given car count always produces the same field, and a clean lap carries
-you through — while time lost on the grass hands places straight back.
+### The chase
+
+The field **gets off the line harder than you do**. AI cars reach their own top
+speed in `aiAccelerationTime` (0.7s) against the player's 2s, so they are gone
+up the road while you are still winding up — two seconds in you are still last
+with the leader 540px away. Their top speeds are then spread between
+`aiSpeedMin` and `aiSpeedMax` (0.82–0.96 of Full Speed) from a fixed seed, so
+you reel them in over the distance rather than the first few seconds.
+
+A clean lap with the default 12 cars runs:
+
+| 0s | 5s | 10s | 15s | 20s | 25s+ |
+| --- | --- | --- | --- | --- | --- |
+| P13 | P13 | P6 | P2 | P2 | **P1** |
+
+The lead comes at 20.4s — 52% into the lap. Getting there needs a clean run:
+the quickest AI is only 4% slower than you, so you gain about 17px/s on it, and
+three seconds on the grass costs roughly a thousand pixels you will not get
+back inside a lap.
+
+Two settings control how long the chase lasts. `aiSpeedMax` towards 1.0
+stretches it — past about 0.98 the leaders stop being catchable within a lap at
+all. `aiAccelerationTime` lower makes the getaway more dramatic.
+
+From a 100-car grid a clean lap finishes **P12, having passed 90 cars** — you
+cannot win from a hundredth place in one lap, which seems right.
 
 Two behaviours turned out to be essential, and neither was obvious up front:
 
@@ -231,10 +254,10 @@ Measured behaviour, from `tools/simulate.js`:
 
 | Cars | Off-road | Overlapping | Field pace |
 | --- | --- | --- | --- |
-| 5 | 3.0% | 0.00% | 93% |
-| 12 | 1.9% | 0.04% | 92% |
-| 40 | 1.4% | 0.01% | 83% |
-| 100 | 0.5% | 0.00% | 78% |
+| 5 | 0.0% | 0.00% | 98% |
+| 12 | 1.0% | 0.00% | 95% |
+| 40 | 0.4% | 0.00% | 89% |
+| 100 | 0.3% | 0.00% | 84% |
 
 "Overlapping" is the share of all car-pair observations closer than a car's
 width. A single worst-case minimum is the wrong measure here — any lane change

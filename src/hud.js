@@ -178,6 +178,11 @@
       if (state.car.bumpFlash > 0) {
         ctx.fillStyle = '#ff8a6b';
         ctx.fillText('CONTACT', view.w / 2, noticeY);
+      } else if (state.car.scrapeFlash > 0) {
+        // Named differently on purpose: a scrape costs no speed, and the
+        // player should be able to tell which kind of hit they just took.
+        ctx.fillStyle = '#ffcf5c';
+        ctx.fillText('SCRAPE', view.w / 2, noticeY);
       } else if (state.car.recoverFlash > 0) {
         ctx.fillStyle = '#7ec8f2';
         ctx.fillText('BACK ON TRACK', view.w / 2, noticeY);

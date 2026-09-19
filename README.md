@@ -237,16 +237,44 @@ separating-axis test on the two oriented boxes: cars are 56×32 racing in lanes
 64px apart, so a circle test would both miss a nose-to-tail shunt and fire
 constantly between cars running safely side by side.
 
+### Shunts and scrapes
+
+**Only running into the back of a car costs you speed.** Brushing one you are
+passing pushes the cars apart but leaves acceleration and top speed untouched —
+clipping a corner on the way past should not drag you down to that car's pace.
+
+A contact counts as a **shunt** when both are true: the contact normal lines up
+with the player's heading (within about 53°), *and* the two cars overlap across
+their width by more than 45%. The normal alone is not enough — coming up behind
+a car in the next lane and clipping its rear corner touches nose-to-tail first
+whatever the lateral offset, so the normal says "shunt" for what is plainly a
+graze. Measured, against a 200 px/s car at 420:
+
+| Lateral offset | Width overlap | Verdict | Speed after |
+| --- | --- | --- | --- |
+| 0px | 100% | shunt | 200 px/s |
+| 8px | 75% | shunt | 200 px/s |
+| 14px | 56% | shunt | 200 px/s |
+| 20px | 38% | **scrape** | **420 px/s** |
+| 26px | 19% | **scrape** | **420 px/s** |
+| 30px | 6% | **scrape** | **420 px/s** |
+
+Being run into *from behind* by a quicker car is not a shunt either — that is
+not the player's mistake. The HUD names which one you just took: **CONTACT** for
+a shunt, **SCRAPE** for a graze.
+
 The response has two halves:
 
-* **A one-off speed drop when a contact begins.** The player is knocked back to
+* **A one-off speed drop when a shunt begins.** The player is knocked back to
   roughly the speed of the car hit. A flag on that AI car marks the contact as
   counted, so a sustained shunt cannot re-trigger every frame; it clears once
   the cars separate, so hitting the same car again later counts again.
-* **A positional push and a speed cap while the contact lasts**, so the player
-  cannot drive through the car in front. Without the cap the player would
-  accelerate into it, penetrate, get shoved back and jitter; with it they sit at
-  the other car's pace until they steer clear.
+* **A positional push, and — for a shunt only — a speed cap while the contact
+  lasts**, so the player cannot drive through the car in front. Without the cap
+  they would accelerate into it, penetrate, get shoved back and jitter; with it
+  they sit at the other car's pace until they steer clear. A scrape pushes but
+  never caps. The verdict is fixed when the contact begins, so a wobble in the
+  contact normal cannot turn a scrape into a shunt half-way through.
 
 AI cars are not moved or slowed by the player, and AI-to-AI behaviour is
 unchanged. Measured: hitting cars at 300 / 240 / 180 px/s in turn drops the

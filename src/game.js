@@ -405,6 +405,7 @@
     // After both have moved, so contacts are tested against final positions.
     BR.collision.resolve(this.car, this.field, this.cfg);
     if (this.car.bumpFlash > 0) this.car.bumpFlash -= dt;
+    if (this.car.scrapeFlash > 0) this.car.scrapeFlash -= dt;
     this.position = BR.ai.playerPosition(this.field, this.car.loc.s);
 
     if (this.car.hasFinishedLap()) {

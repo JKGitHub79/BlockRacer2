@@ -41,6 +41,26 @@
   // player can always creep and steer out rather than being frozen in place.
   var MIN_CONTACT_SPEED_FRACTION = 0.12;
 
+  // How closely the contact normal must line up with the player's heading to
+  // count as running into the back of something rather than brushing past it.
+  // 0.6 is about 53 degrees. The minimum-translation axis is what makes this
+  // reliable: it reflects HOW the two boxes overlap, not merely where the
+  // other car's centre is. Two cars running side by side have their centres
+  // well forward of each other but overlap across their width, which is a
+  // scrape; a car directly ahead overlaps along its length, which is a shunt.
+  var FRONTAL_COS = 0.6;
+
+  // How squarely behind the other car the player must be for a longitudinal
+  // contact to count as a shunt, as a fraction of how much of the two cars'
+  // widths overlap.
+  //
+  // The normal alone is not enough. Coming up behind a car in the next lane
+  // and clipping its rear corner touches nose-to-tail first whatever the
+  // lateral offset, so the normal says "shunt" for what is plainly a graze
+  // while passing. Requiring the cars to be properly lined up as well means
+  // only actually running into the back of something costs speed.
+  var SQUARE_ENOUGH = 0.45;
+
   /* Separating-axis test between two oriented boxes of the same size.
    *
    * Returns a SIGNED depth along the best axis: positive means overlapping by
@@ -132,12 +152,33 @@
         player.y -= hit.ny * push;
 
         if (!ai.playerContact) {
-          // Contact begins: knock the player back to roughly this car's pace.
-          player.speed = Math.min(player.speed, ai.speed);
-          // Hitting something kills the drift; carrying a slide through a
-          // collision would shove the player sideways out of the contact.
+          // Which way did the player hit it? Only running into the back of
+          // something costs speed. A side-swipe pushes the cars apart but
+          // leaves acceleration and top speed alone — brushing a car you are
+          // passing should not drag you down to its pace.
+          //
+          // A negative value means the normal points BEHIND the player, i.e.
+          // something ran into them from behind. That does not slow them
+          // either; being shoved from behind is not the player's mistake.
+          var forwardX = Math.cos(player.heading), forwardY = Math.sin(player.heading);
+          var alongForward = hit.nx * forwardX + hit.ny * forwardY;
+
+          // How much of the two cars' widths overlap, across the player.
+          var sideGap = Math.abs(dx * -forwardY + dy * forwardX);
+          var squareness = Math.max(0, (cfg.carWidth - sideGap) / cfg.carWidth);
+
+          ai.playerContactFrontal = alongForward > FRONTAL_COS &&
+                                    squareness > SQUARE_ENOUGH;
+
+          if (ai.playerContactFrontal) {
+            player.speed = Math.min(player.speed, ai.speed);
+            player.bumpFlash = 0.7;
+          } else {
+            player.scrapeFlash = 0.7;
+          }
+          // Either way the drift stops: carrying a slide through a collision
+          // would shove the player sideways out of the contact.
           player.slideVel = 0;
-          player.bumpFlash = 0.7;
           newHits++;
           ai.playerContact = true;
         }
@@ -146,8 +187,11 @@
         continue;
       }
 
-      // Hold them there for as long as they are touching.
-      if (ai.speed < limit) limit = ai.speed;
+      // Only a car the player ran into from behind holds them back. The
+      // classification is the one taken when the contact began, so a wobble in
+      // the minimum-translation axis cannot turn a scrape into a shunt
+      // half-way through.
+      if (ai.playerContactFrontal && ai.speed < limit) limit = ai.speed;
     }
 
     player.speedLimit = (limit === Infinity) ? undefined
@@ -159,7 +203,11 @@
   function reset(player, field) {
     player.speedLimit = undefined;
     player.bumpFlash = 0;
-    for (var i = 0; i < field.length; i++) field[i].playerContact = false;
+    player.scrapeFlash = 0;
+    for (var i = 0; i < field.length; i++) {
+      field[i].playerContact = false;
+      field[i].playerContactFrontal = false;
+    }
   }
 
   BR.collision = { resolve: resolve, reset: reset, overlap: overlap };

@@ -656,7 +656,8 @@ function collisionRig(targets) {
 function runRig(rig, seconds, steer, afterStep) {
   var p = rig.player, log = {
     impacts: [], maxStep: 0, passedThrough: false, recoveries: 0,
-    minSpeed: Infinity, maxSpeed: 0, samples: []
+    minSpeed: Infinity, minSpeedAtPace: Infinity, reachedPace: false,
+    maxSpeed: 0, samples: []
   };
   var t = 0;
   while (t < seconds) {
@@ -674,11 +675,14 @@ function runRig(rig, seconds, steer, afterStep) {
       // Record WHICH car each impact was with. A car hit, escaped and then
       // caught again is a legitimate second impact, not a double count, so
       // the tests need to distinguish cars from events.
-      var which = -1;
+      var which = -1, frontal = false;
       rig.field.forEach(function (ai, idx) {
-        if (ai.playerContact && !contactBefore[idx]) which = idx;
+        if (ai.playerContact && !contactBefore[idx]) {
+          which = idx;
+          frontal = !!ai.playerContactFrontal;
+        }
       });
-      log.impacts.push({ t: t, from: before, to: p.speed, car: which });
+      log.impacts.push({ t: t, from: before, to: p.speed, car: which, frontal: frontal });
     }
     // The off-road recovery deliberately lifts the car back onto the racing
     // line, which is a ~200px jump and nothing to do with collisions. Only
@@ -687,6 +691,10 @@ function runRig(rig, seconds, steer, afterStep) {
     if (recovered) log.recoveries++;
     else log.maxStep = Math.max(log.maxStep, Math.hypot(p.x - px, p.y - py));
     log.minSpeed = Math.min(log.minSpeed, p.speed);
+    // Minimum speed once the car has actually got up to pace — the standing
+    // start is not a speed loss.
+    if (p.speed >= rig.cfg.fullSpeed - 1) log.reachedPace = true;
+    if (log.reachedPace) log.minSpeedAtPace = Math.min(log.minSpeedAtPace, p.speed);
     log.maxSpeed = Math.max(log.maxSpeed, p.speed);
     // Pass-through: the player ending up in front of a car it is touching.
     rig.field.forEach(function (ai) {
@@ -823,6 +831,111 @@ function runRig(rig, seconds, steer, afterStep) {
   check('and still drops to roughly that car speed',
         !!second && Math.abs(second.to - 120) < 30,
         second ? second.to.toFixed(0) + ' px/s vs 120' : 'n/a');
+})();
+
+// --- A side-swipe must not cost speed ---------------------------------------
+//
+// Running into the back of something drags the player down to its pace;
+// brushing a car being passed should not. Both are still solid — neither lets
+// the cars overlap — but only the shunt costs speed.
+(function () {
+  var cfg = makeConfig();
+  // Overlapping by 6px across the cars' width: close enough to touch while
+  // passing, nowhere near a nose-to-tail shunt.
+  var rig = collisionRig([{ s: 700, speed: 200, lane: cfg.carWidth - 6 }]);
+  var log = runRig(rig, 14);
+
+  var sideHits = log.impacts.filter(function (i) { return !i.frontal; });
+  var frontHits = log.impacts.filter(function (i) { return i.frontal; });
+  var worstDrop = log.impacts.reduce(function (a, i) {
+    return Math.min(a, i.to);
+  }, Infinity);
+
+  console.log('  brushing past a 200 px/s car in the next lane over');
+  console.log('    impacts            ' + log.impacts.map(function (i) {
+    return (i.frontal ? 'shunt' : 'scrape') + ' ' + i.from.toFixed(0) + '->' + i.to.toFixed(0);
+  }).join(',  '));
+  console.log('    speed at the end   ' + rig.player.speed.toFixed(0) + ' px/s' +
+              '   min once up to pace   ' + log.minSpeedAtPace.toFixed(0) + ' px/s\n');
+
+  check('brushing a car alongside registers as a scrape, not a shunt',
+        sideHits.length >= 1 && frontHits.length === 0,
+        sideHits.length + ' scrapes, ' + frontHits.length + ' shunts');
+  check('a scrape costs no speed at all',
+        worstDrop === Infinity || worstDrop >= cfg.fullSpeed - 1,
+        'lowest speed on contact ' + (worstDrop === Infinity ? 'n/a' : worstDrop.toFixed(0)));
+  check('the player is never capped by a scrape',
+        rig.player.speedLimit === undefined ||
+        rig.player.speedLimit >= cfg.fullSpeed - 1,
+        rig.player.speedLimit === undefined ? 'uncapped' : rig.player.speedLimit.toFixed(0));
+  check('the player stays at full speed throughout the pass',
+        log.minSpeedAtPace >= cfg.fullSpeed - 1,
+        log.minSpeedAtPace.toFixed(0) + ' px/s minimum once up to pace');
+  check('the cars still do not overlap', !log.passedThrough &&
+        log.maxStep < cfg.fullSpeed * STEP + 7, log.maxStep.toFixed(2) + 'px biggest step');
+})();
+
+// --- A rear-end is still classified as a shunt and still costs speed --------
+(function () {
+  var rig = collisionRig([{ s: 900, speed: 240, lane: 0 }]);
+  var log = runRig(rig, 8);
+  var first = log.impacts[0];
+  check('running into the back of a car is classified as a shunt',
+        !!first && first.frontal, first ? (first.frontal ? 'shunt' : 'scrape') : 'no impact');
+  check('and still drops the player to that car speed',
+        !!first && Math.abs(first.to - 240) < 25,
+        first ? first.to.toFixed(0) + ' px/s vs 240' : 'n/a');
+})();
+
+// --- Being run into from behind must not slow the player --------------------
+(function () {
+  var cfg = makeConfig();
+  // A car right behind the player, quicker than them, that catches and nudges.
+  var rig = collisionRig([{ s: -40, speed: cfg.fullSpeed, lane: 0 }]);
+  rig.player.speed = cfg.fullSpeed * 0.6;
+  rig.player.speedLimit = cfg.fullSpeed * 0.6;   // hold the player back a moment
+  var log = runRig(rig, 3);
+  rig.player.speedLimit = undefined;
+  var hits = log.impacts;
+
+  check('a car running into the player from behind does not slow them',
+        hits.every(function (i) { return !i.frontal; }),
+        hits.length + ' impacts, ' + hits.filter(function (i) { return i.frontal; }).length +
+        ' classified as shunts');
+})();
+
+// --- Where the line between a shunt and a scrape sits -----------------------
+(function () {
+  var cfg = makeConfig();
+  console.log('');
+  console.log('  lateral offset   width overlap   verdict   speed after');
+  var results = [];
+  [0, 8, 14, 20, 26, 30].forEach(function (gap) {
+    var rig = collisionRig([{ s: 800, speed: 200, lane: gap }]);
+    var log = runRig(rig, 10);
+    var first = log.impacts[0];
+    var overlap = Math.max(0, cfg.carWidth - gap);
+    results.push({ gap: gap, frontal: first ? first.frontal : null });
+    console.log('  ' + (gap + 'px').padEnd(17) +
+                (overlap + 'px (' + Math.round(100 * overlap / cfg.carWidth) + '%)').padEnd(16) +
+                (first ? (first.frontal ? 'shunt' : 'scrape') : 'no contact').padEnd(10) +
+                (first ? first.to.toFixed(0) + ' px/s' : '-'));
+  });
+  console.log('');
+
+  check('squarely behind counts as a shunt',
+        results[0].frontal === true && results[1].frontal === true,
+        '0px and 8px offsets');
+  check('barely clipping the corner counts as a scrape',
+        results[4].frontal === false && results[5].frontal === false,
+        '26px and 30px offsets');
+  // The boundary should be a single crossing, not a scatter.
+  var flips = 0;
+  for (var i = 1; i < results.length; i++) {
+    if (results[i].frontal !== results[i - 1].frontal) flips++;
+  }
+  check('the verdict switches over once, cleanly', flips === 1,
+        flips + ' changes across the sweep');
 })();
 
 // --- Cars running side by side must not collide -----------------------------

@@ -612,6 +612,69 @@ function sectionNewSystems() {
     });
   });
 
+  // --- a shunt costs speed, a scrape does not ------------------------------
+  chain = chain.then(function () {
+    return withPage(function (page) {
+      return page.click('#btn-start').then(function () { return page.waitForTimeout(400); });
+    }, function (page) {
+      // Driven through the shipped collision module in the real page, with
+      // the two cars placed by hand: real-time steering cannot be relied on
+      // to produce a given overlap at a given moment.
+      return page.evaluate(function () {
+        var BR = window.BR, g = window.__game;
+
+        // A straight test track built from the live config. On the real track
+        // a car driving hands-off drifts wide through the corners — 217px off
+        // line by the time it reaches the other car — and never touches it.
+        var cfg = {};
+        Object.keys(g.cfg).forEach(function (k) { cfg[k] = g.cfg[k]; });
+        cfg.track = { name: 'straight', qualifyingTime: 99,
+                      segments: [{ type: 'straight', seconds: 120 }] };
+        var track = BR.track.build(cfg);
+
+        function trial(lateralGap) {
+          var ai = new BR.Car(cfg, track);
+          var p = BR.track.at(track, 900);
+          ai.x = p.x - Math.sin(p.h) * lateralGap;
+          ai.y = p.y + Math.cos(p.h) * lateralGap;
+          ai.heading = p.h;
+          ai.speed = 200;
+          ai.hint = Math.round(900 / BR.track.SAMPLE_SPACING);
+          ai.loc = BR.track.locate(track, ai.x, ai.y, ai.hint);
+
+          var car = new BR.Car(cfg, track);
+          var field = [ai];
+          BR.collision.reset(car, field);
+          for (var i = 0; i < 1800; i++) {
+            car.update(1 / 120, 0);
+            var hits = BR.collision.resolve(car, field, cfg);
+            if (hits > 0) {
+              return { frontal: !!ai.playerContactFrontal, speed: car.speed,
+                       limit: car.speedLimit === undefined ? -1 : car.speedLimit };
+            }
+          }
+          return null;
+        }
+        return { square: trial(0), clip: trial(26), full: cfg.fullSpeed };
+      });
+    }).then(function (r) {
+      console.log('');
+      console.log('  square on: ' + (r.square ? (r.square.frontal ? 'shunt' : 'scrape') +
+                  ' -> ' + r.square.speed.toFixed(0) + ' px/s' : 'no contact') +
+                  '    clipping: ' + (r.clip ? (r.clip.frontal ? 'shunt' : 'scrape') +
+                  ' -> ' + r.clip.speed.toFixed(0) + ' px/s' : 'no contact'));
+      check('hitting a car square on still costs speed',
+            !!r.square && r.square.frontal && r.square.speed < r.full - 100,
+            r.square ? r.square.speed.toFixed(0) + ' px/s' : 'no contact');
+      check('clipping a car alongside costs no speed',
+            !!r.clip && !r.clip.frontal && r.clip.speed >= r.full - 1,
+            r.clip ? r.clip.speed.toFixed(0) + ' px/s' : 'no contact');
+      check('a scrape does not cap the player either',
+            !!r.clip && r.clip.limit === -1,
+            r.clip ? (r.clip.limit === -1 ? 'uncapped' : r.clip.limit.toFixed(0)) : 'n/a');
+    });
+  });
+
   // --- the slide, at top speed and below it --------------------------------
   function slideProbe(distance, fraction) {
     return withPage(function (page) {

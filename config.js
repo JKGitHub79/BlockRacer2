@@ -109,9 +109,19 @@ BR.DEFAULT_CONFIG = {
   roadWidthInCars: 6,
   lanes: 3,
 
-  // How far ahead of the car the camera looks, as a fraction of a screen
-  // height, at Full Speed. 0 keeps the car dead centre.
-  lookAhead: 0.30,
+  // How far ahead of the car the camera looks at Full Speed, as a fraction of
+  // the visible world extent ON EACH AXIS. 0 keeps the car dead centre. The
+  // car ends up at most 2 x this from the middle of the screen (so 0.19 puts
+  // it ~38% of the way to the edge), identically on every display, while a
+  // taller screen turns that same framing into more visible road ahead.
+  lookAhead: 0.19,
+
+  // The world extent, in world pixels, guaranteed visible along the SHORTER
+  // screen axis. This is what makes the game fair across displays: every
+  // screen sees at least this much track in every direction, so the qualifying
+  // time means the same thing on a phone and on a desktop. Lower it to zoom
+  // in (bigger car, less warning of what is coming), raise it to zoom out.
+  viewMinWorld: 600,
 
 
   /* --- Track 1 ------------------------------------------------------------- */

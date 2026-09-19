@@ -29,8 +29,11 @@
       summary:    document.getElementById('config-summary')
     };
 
+    this.viewport = new BR.Viewport(canvas, this.cfg);
     this.buildWorld();
     this.bindInput();
+    this.bindTouch();
+    this.bindResize();
     this.bindUI();
     this.syncFormFromConfig();
   }
@@ -39,7 +42,9 @@
   Game.prototype.buildWorld = function () {
     this.track = BR.track.build(this.cfg);
     this.car = new BR.Car(this.cfg, this.track);
-    this.renderer = new BR.Renderer(this.canvas, this.cfg, this.track);
+    this.viewport.cfg = this.cfg;
+    this.viewport.measure();
+    this.renderer = new BR.Renderer(this.canvas, this.cfg, this.track, this.viewport);
     this.renderer.updateCamera(this.car, 0, true);
     this.elapsed = 0;
     this.lap = 1;
@@ -84,14 +89,112 @@
     window.addEventListener('blur', function () {
       self.keys.left = false;
       self.keys.right = false;
+      if (self.releaseTouch) self.releaseTouch();
       if (self.phase === 'racing') self.setPhase('paused');
+    });
+
+    // Switching apps or locking a phone should not run the clock on.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        self.keys.left = self.keys.right = false;
+        if (self.releaseTouch) self.releaseTouch();
+        if (self.phase === 'racing') self.setPhase('paused');
+      }
     });
   };
 
   Game.prototype.steerInput = function () {
-    if (this.keys.left && !this.keys.right) return -1;
-    if (this.keys.right && !this.keys.left) return 1;
+    var left = this.keys.left || this.touch.left;
+    var right = this.keys.right || this.touch.right;
+    if (left && !right) return -1;
+    if (right && !left) return 1;
     return 0;
+  };
+
+  // ---------------------------------------------------------------- touch --
+
+  /* Touch steering: the left half of the screen steers left, the right half
+   * steers right. Pointers are tracked by id so that holding one side and
+   * tapping the other behaves, and so a lifted finger only releases its own
+   * side. The canvas sets `touch-action: none`, so these never scroll or zoom
+   * the page. */
+  Game.prototype.bindTouch = function () {
+    var self = this;
+    this.touch = { left: false, right: false };
+    this.pointers = {};
+
+    function sideFor(clientX) {
+      var rect = self.canvas.getBoundingClientRect();
+      return (clientX - rect.left) < rect.width / 2 ? 'left' : 'right';
+    }
+
+    function apply() {
+      var left = false, right = false;
+      Object.keys(self.pointers).forEach(function (id) {
+        if (self.pointers[id] === 'left') left = true; else right = true;
+      });
+      self.touch.left = left;
+      self.touch.right = right;
+    }
+
+    function down(e) {
+      if (self.phase !== 'racing' && self.phase !== 'countdown') return;
+      self.pointers[e.pointerId] = sideFor(e.clientX);
+      apply();
+      e.preventDefault();
+    }
+    function move(e) {
+      if (self.pointers[e.pointerId] === undefined) return;
+      // Sliding across the middle switches sides without lifting a finger.
+      self.pointers[e.pointerId] = sideFor(e.clientX);
+      apply();
+      e.preventDefault();
+    }
+    function up(e) {
+      if (self.pointers[e.pointerId] === undefined) return;
+      delete self.pointers[e.pointerId];
+      apply();
+      e.preventDefault();
+    }
+
+    this.canvas.addEventListener('pointerdown', down);
+    this.canvas.addEventListener('pointermove', move);
+    this.canvas.addEventListener('pointerup', up);
+    this.canvas.addEventListener('pointercancel', up);
+    this.canvas.addEventListener('pointerleave', up);
+
+    this.releaseTouch = function () {
+      self.pointers = {};
+      self.touch.left = self.touch.right = false;
+    };
+  };
+
+  // --------------------------------------------------------------- resize --
+
+  Game.prototype.bindResize = function () {
+    var self = this;
+    var pending = null;
+
+    function onResize() {
+      // Coalesce bursts (orientation changes fire several events) into one
+      // measure on the next frame.
+      if (pending) return;
+      pending = window.requestAnimationFrame(function () {
+        pending = null;
+        if (self.viewport.measure()) {
+          // Re-frame immediately so a rotation does not pan the camera.
+          self.renderer.updateCamera(self.car, 0, true);
+        }
+      });
+    }
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    // Mobile browsers change the visual viewport when chrome hides/shows
+    // without always firing a window resize.
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onResize);
+    }
   };
 
   // ------------------------------------------------------------------- UI --
@@ -233,6 +336,7 @@
     this.cfg = BR.settings.save(this.readForm());
     this.buildWorld();
     this.keys.left = this.keys.right = false;
+    if (this.releaseTouch) this.releaseTouch();
     this.setPhase('countdown');
   };
 
@@ -290,7 +394,7 @@
     this.renderer.drawWorld(this.car);
 
     if (this.phase !== 'title') {
-      BR.hud.draw(this.canvas.getContext('2d'), this.canvas, {
+      BR.hud.draw(this.canvas.getContext('2d'), this.viewport, {
         elapsed: this.elapsed,
         lap: this.lap,
         car: this.car,
@@ -304,6 +408,13 @@
 
   Game.prototype.run = function () {
     var self = this;
+    // Show whichever control hint applies to this device.
+    var keysHint = document.getElementById('controls-keys');
+    var touchHint = document.getElementById('controls-touch');
+    if (keysHint && touchHint && this.viewport.touch) {
+      keysHint.classList.add('hidden');
+      touchHint.classList.remove('hidden');
+    }
     this.setPhase('title');
     window.requestAnimationFrame(function (t) { self.frame(t); });
   };

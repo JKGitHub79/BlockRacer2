@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>BlockRacer2 &mdash; Stage 1</title>
 <style>
   :root {
@@ -16,39 +19,79 @@
     --bad: #ff7676;
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0; height: 100%;
+  html { height: 100%; }
+  body {
+    margin: 0;
+    height: 100vh;
+    height: 100dvh;          /* tracks mobile browser chrome showing/hiding */
     background: #0b0d13;
     color: var(--ink);
     font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
-  body { display: flex; align-items: center; justify-content: center; padding: 16px; }
 
+  /* The stage fills the screen by default (phones, tablets) and only takes on
+     a framed, bounded look once there is room for it. */
   #stage {
     position: relative;
-    width: 960px; max-width: 100%;
-    aspect-ratio: 960 / 600;
-    box-shadow: 0 18px 60px rgba(0,0,0,0.6);
-    border-radius: 10px;
+    width: 100%; height: 100%;
     overflow: hidden;
   }
-  #game { display: block; width: 100%; height: 100%; background: #3f7a34; }
+  #game {
+    display: block; width: 100%; height: 100%;
+    background: #3f7a34;
+    touch-action: none;      /* steering must never scroll or zoom the page */
+  }
+
+  @media (min-width: 900px) and (min-height: 640px) {
+    body { padding: 16px; }
+    #stage {
+      max-width: 1280px; max-height: 800px;
+      border-radius: 10px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+    }
+  }
 
   .overlay {
     position: absolute; inset: 0;
     display: flex; flex-direction: column;
     align-items: center; justify-content: flex-start;
-    gap: 12px; padding: 16px;
+    gap: 12px;
+    padding: calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
+             calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     background: rgba(8,10,16,0.82);
     backdrop-filter: blur(3px);
     text-align: center;
   }
   .overlay.hidden { display: none; }
+  /* General-purpose: the control hints are spans, not overlays, and were
+     showing both keyboard and touch text at once without this. */
+  .hidden { display: none !important; }
   /* Spacers absorb the free space so content is centred when it fits, but the
      panel scrolls instead of clipping when it does not. */
   .overlay::before, .overlay::after { content: ''; margin: auto; }
   .overlay > * { flex-shrink: 0; }
+
+  /* On the title screen the SETTINGS scroll rather than the whole overlay, so
+     "Start Race" is always on screen. Without this, a small phone drops the
+     button below the fold and the player has to go looking for it. The auto
+     margins keep the group vertically centred when it does all fit. */
+  #title-screen { justify-content: flex-start; overflow: hidden; }
+  #title-screen::before, #title-screen::after { content: none; }
+  #title-screen > h1 { margin-top: auto; }
+  #title-screen > .controls { margin-bottom: auto; }
+  #title-screen .settings {
+    flex: 0 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
 
   h1 { margin: 0; font-size: 31px; letter-spacing: 3px; }
   h1 small { display: block; font-size: 11px; letter-spacing: 4px; color: var(--muted); margin-top: 5px; font-weight: 400; }
@@ -92,6 +135,29 @@
     border-bottom-width: 2px; border-radius: 4px;
     padding: 1px 6px; font-family: inherit; font-size: 11px;
   }
+  /* ---- Narrow screens: stack each setting so the slider gets full width --- */
+  @media (max-width: 680px) {
+    h1 { font-size: 25px; letter-spacing: 2px; }
+    h1 small { font-size: 10px; letter-spacing: 3px; }
+    .settings { padding: 6px 12px; }
+    .setting {
+      grid-template-columns: 1fr auto;
+      gap: 2px 10px;
+      padding: 7px 0;
+    }
+    .setting label { grid-column: 1; grid-row: 1; font-size: 12px; }
+    .setting label em { display: none; }
+    .readout { grid-column: 2; grid-row: 1; }
+    .slider-wrap { grid-column: 1 / -1; grid-row: 2; }
+    .controls { font-size: 11px; }
+    button { padding: 11px 20px; }
+  }
+
+  /* Comfortable touch targets for the slider thumbs. */
+  input[type=range] { height: 26px; background: transparent; }
+  input[type=range]::-webkit-slider-thumb { width: 20px; height: 20px; }
+  input[type=range]::-moz-range-thumb { width: 20px; height: 20px; }
+
   .result-good { color: var(--good); }
   .result-bad  { color: var(--bad); }
   #result-body { font-size: 16px; line-height: 1.8; }
@@ -190,8 +256,11 @@
     </div>
 
     <div class="controls">
-      <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or <kbd>A</kbd> <kbd>D</kbd> to steer &nbsp;&bull;&nbsp;
-      <kbd>Enter</kbd> start &nbsp;&bull;&nbsp; <kbd>R</kbd> restart &nbsp;&bull;&nbsp; <kbd>P</kbd> pause
+      <span id="controls-keys"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> or <kbd>A</kbd> <kbd>D</kbd> to steer
+      &nbsp;&bull;&nbsp; <kbd>Enter</kbd> start &nbsp;&bull;&nbsp; <kbd>R</kbd> restart
+      &nbsp;&bull;&nbsp; <kbd>P</kbd> pause</span>
+      <span id="controls-touch" class="hidden">Touch and hold the <strong>left</strong> or
+      <strong>right</strong> half of the screen to steer</span>
       <br>
       The car accelerates on its own and there is no brake. Release the steering and the car
       settles back onto the direction of the road &mdash; but not fast enough to take a corner
@@ -218,6 +287,7 @@
 
 <script src="config.js"></script>
 <script src="src/settings.js"></script>
+<script src="src/viewport.js"></script>
 <script src="src/track.js"></script>
 <script src="src/car.js"></script>
 <script src="src/render.js"></script>

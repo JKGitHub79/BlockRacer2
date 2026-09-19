@@ -5,6 +5,8 @@ the only thing you control is the wheel. Beat the qualifying time.
 
 ![Track 1](docs/racing.png)
 
+<img src="docs/mobile.png" alt="Phone portrait" width="260">
+
 ## Running it
 
 No build step and no dependencies. Open `index.html` in a browser.
@@ -18,15 +20,56 @@ npm start        # http://localhost:8080
 
 ## Controls
 
-| Key | Action |
-| --- | --- |
-| <kbd>&larr;</kbd> / <kbd>A</kbd> | Steer left |
-| <kbd>&rarr;</kbd> / <kbd>D</kbd> | Steer right |
-| <kbd>Enter</kbd> / <kbd>Space</kbd> | Start / race again |
-| <kbd>R</kbd> | Restart |
-| <kbd>P</kbd> / <kbd>Esc</kbd> | Pause |
+| Key | Touch | Action |
+| --- | --- | --- |
+| <kbd>&larr;</kbd> / <kbd>A</kbd> | hold the **left half** of the screen | Steer left |
+| <kbd>&rarr;</kbd> / <kbd>D</kbd> | hold the **right half** of the screen | Steer right |
+| <kbd>Enter</kbd> / <kbd>Space</kbd> | tap the button | Start / race again |
+| <kbd>R</kbd> | | Restart |
+| <kbd>P</kbd> / <kbd>Esc</kbd> | | Pause |
 
 There is no throttle and no brake. Acceleration is automatic.
+
+The title screen shows whichever set of controls applies to the device. On a
+touch screen, faint arrows mark the two steering halves while racing; sliding a
+finger across the middle switches sides without lifting it, and multi-touch is
+handled so holding one side and tapping the other behaves.
+
+## Screens and resolutions
+
+The game fills whatever screen it is on — phone, tablet or desktop, portrait or
+landscape — and re-measures on rotation, resize, and when mobile browser chrome
+slides in and out.
+
+**The scale is chosen so no screen has an advantage.** This matters because the
+game is scored against a qualifying time: if a phone saw less road ahead than a
+desktop, 22.50s would be a harder target on the phone. So the world-to-screen
+scale is set from the **shorter screen axis** against a fixed world extent
+(`viewMinWorld`, 600px). Every display sees at least 600 world pixels in every
+direction; larger or wider ones see more, never less. Physics are in absolute
+world units and never consult the viewport, so lap times match across devices —
+the test suite drives a full lap on a phone and on a desktop and compares them
+(they land 0.02s apart).
+
+| | CSS size | Backing store | World visible |
+| --- | --- | --- | --- |
+| Small phone | 320×568 | 640×1136 | 600×1065 |
+| Phone portrait | 390×844 | 780×1688 | 600×1298 |
+| Phone landscape | 844×390 | 1688×780 | 1298×600 |
+| Tablet | 820×1180 | 1640×2360 | 600×863 |
+| Desktop | 1280×800 | 1280×800 | 960×600 |
+
+The canvas renders at device pixel ratio (capped at 2 — a 3× phone costs 9× the
+fill rate for very little visible gain). The HUD scales with the shorter axis
+and its panels are capped against the real screen width, so they cannot overlap
+on a narrow display. On the title screen the settings panel scrolls internally
+rather than the whole overlay, so **Start Race** is never below the fold.
+
+Camera look-ahead is taken per axis, each as a fraction of what that axis can
+see. That keeps the car in the same spot on screen everywhere while letting a
+tall portrait phone turn its height into visible road ahead — a single distance
+along the heading does neither, leaving portrait wasting half a screen on empty
+road behind, or shoving the car off the side on a diagonal.
 
 ## How the steering works
 
@@ -165,9 +208,12 @@ in exactly the configured time, and that all this survives the extremes of every
 title-screen setting. Section 8 pins the steering-feel numbers in the table
 above so responsiveness cannot regress.
 
-`tools/browser-test.js` loads the page in Chromium, exercises the title-screen
-sliders and the reset button, then drives a full lap with real key events and
-asserts the result screen reports QUALIFIED.
+`tools/browser-test.js` loads the page in Chromium and covers the title-screen
+sliders, range labels and reset button; a full lap driven with real key events;
+layout and world scale across six resolutions from a 320px phone to an
+ultrawide; touch steering on a phone viewport (including that it never scrolls
+or zooms the page); and that a lap on a phone takes the same time as one on a
+desktop.
 
 ## Notes and known limitations
 

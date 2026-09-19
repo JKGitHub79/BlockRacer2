@@ -1,4 +1,8 @@
-/* HUD: drawn on the canvas above the world. */
+/* HUD: drawn on the canvas above the world, in CSS pixels.
+ *
+ * Every size here is derived from view.ui (which tracks the shorter screen
+ * axis) and every panel width is capped against the actual screen width, so
+ * the layout holds from a narrow phone up to a desktop without overlapping. */
 (function (BR) {
   'use strict';
 
@@ -17,126 +21,164 @@
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   }
 
-  function draw(ctx, canvas, state, cfg, track) {
-    var pad = 14;
-    var w = 210;
-    var x = canvas.width - w - pad;
-    var y = pad;
+  function font(size, bold) {
+    return (bold ? 'bold ' : '') + Math.round(size) + 'px "Segoe UI", Arial, sans-serif';
+  }
+
+  /* Faint steering zones, shown only on touch screens so the player can see
+   * that the left and right halves of the display are the controls. */
+  function drawTouchZones(ctx, view) {
+    var u = view.ui;
+    var midY = view.h * 0.5;
+    var inset = 16 * u;
+    var size = 20 * u;
+
+    ctx.save();
+    ctx.globalAlpha = 0.20;
+    ctx.fillStyle = '#ffffff';
+    [-1, 1].forEach(function (dir) {
+      var x = dir < 0 ? inset : view.w - inset;
+      ctx.beginPath();
+      ctx.moveTo(x + dir * -size * 0.5, midY);
+      ctx.lineTo(x + dir * size * 0.5, midY - size * 0.7);
+      ctx.lineTo(x + dir * size * 0.5, midY + size * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  function draw(ctx, view, state, cfg, track) {
+    var u = view.ui;
+    var pad = Math.round(10 * u);
+
+    ctx.textBaseline = 'top';
+
+    if (view.touch && state.phase === 'racing') drawTouchZones(ctx, view);
 
     var qualTotal = track.qualifyingTime * cfg.laps;
     var ahead = state.elapsed <= qualTotal;
 
     // --- Timer, top right (current time vs qualifying time) ---------------
-    panel(ctx, x, y, w, 78);
+    var w = Math.min(Math.round(215 * u), view.w - pad * 2);
+    var h = Math.round(74 * u);
+    var x = view.w - w - pad;
+    var y = pad;
 
-    ctx.textBaseline = 'top';
+    panel(ctx, x, y, w, h);
+
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = '11px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(11 * u);
     ctx.textAlign = 'left';
-    ctx.fillText('TIME', x + 12, y + 9);
+    ctx.fillText('TIME', x + 11 * u, y + 8 * u);
     ctx.textAlign = 'right';
-    ctx.fillText('QUALIFYING', x + w - 12, y + 9);
+    ctx.fillText('QUALIFYING', x + w - 11 * u, y + 8 * u);
 
-    ctx.font = 'bold 27px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(26 * u, true);
     ctx.fillStyle = ahead ? '#7ef2a6' : '#ff7676';
     ctx.textAlign = 'left';
-    ctx.fillText(formatTime(state.elapsed), x + 12, y + 24);
+    ctx.fillText(formatTime(state.elapsed), x + 11 * u, y + 22 * u);
 
-    ctx.font = 'bold 15px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(15 * u, true);
     ctx.fillStyle = 'rgba(255,255,255,0.82)';
     ctx.textAlign = 'right';
-    ctx.fillText(formatTime(qualTotal), x + w - 12, y + 34);
+    ctx.fillText(formatTime(qualTotal), x + w - 11 * u, y + 32 * u);
 
-    // Delta bar against the qualifying pace.
+    // Progress against the qualifying pace.
     var frac = Math.max(0, Math.min(1, state.elapsed / qualTotal));
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(x + 12, y + 60, w - 24, 6);
+    ctx.fillRect(x + 11 * u, y + h - 15 * u, w - 22 * u, 6 * u);
     ctx.fillStyle = ahead ? '#7ef2a6' : '#ff7676';
-    ctx.fillRect(x + 12, y + 60, (w - 24) * frac, 6);
+    ctx.fillRect(x + 11 * u, y + h - 15 * u, (w - 22 * u) * frac, 6 * u);
 
     // --- Lap counter ------------------------------------------------------
     if (cfg.laps > 1) {
-      panel(ctx, x, y + 86, w, 30);
+      var lh = Math.round(28 * u);
+      panel(ctx, x, y + h + 8 * u, w, lh);
       ctx.textAlign = 'left';
-      ctx.font = '11px "Segoe UI", Arial, sans-serif';
+      ctx.font = font(11 * u);
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillText('LAP', x + 12, y + 95);
+      ctx.fillText('LAP', x + 11 * u, y + h + 16 * u);
       ctx.textAlign = 'right';
-      ctx.font = 'bold 15px "Segoe UI", Arial, sans-serif';
+      ctx.font = font(15 * u, true);
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(Math.min(state.lap, cfg.laps) + ' / ' + cfg.laps, x + w - 12, y + 93);
+      ctx.fillText(Math.min(state.lap, cfg.laps) + ' / ' + cfg.laps,
+                   x + w - 11 * u, y + h + 14 * u);
     }
 
-    // --- Speed, bottom left ----------------------------------------------
-    var sw = 190, sh = 46;
-    var sx = pad, sy = canvas.height - sh - pad;
-    panel(ctx, sx, sy, sw, sh);
+    // --- Bottom panels: speed (left) and steering angle (right) -----------
+    // Split the width between them so they can never overlap.
+    var bw = Math.min(Math.round(190 * u), Math.floor((view.w - pad * 3) / 2));
+    var bh = Math.round(44 * u);
+    var by = view.h - bh - pad;
+
+    panel(ctx, pad, by, bw, bh);
     ctx.textAlign = 'left';
-    ctx.font = '11px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(11 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText('SPEED', sx + 12, sy + 8);
+    ctx.fillText('SPEED', pad + 11 * u, by + 7 * u);
     ctx.textAlign = 'right';
-    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(14 * u, true);
     ctx.fillStyle = state.car.offRoad ? '#ffcf5c' : '#ffffff';
-    ctx.fillText(Math.round((state.car.speed / cfg.fullSpeed) * 100) + '%', sx + sw - 12, sy + 6);
-
+    ctx.fillText(Math.round((state.car.speed / cfg.fullSpeed) * 100) + '%',
+                 pad + bw - 11 * u, by + 5 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(sx + 12, sy + 28, sw - 24, 8);
+    ctx.fillRect(pad + 11 * u, by + bh - 15 * u, bw - 22 * u, 7 * u);
     ctx.fillStyle = state.car.offRoad ? '#ffcf5c' : '#7ec8f2';
-    ctx.fillRect(sx + 12, sy + 28, (sw - 24) * Math.min(1, state.car.speed / cfg.fullSpeed), 8);
+    ctx.fillRect(pad + 11 * u, by + bh - 15 * u,
+                 (bw - 22 * u) * Math.min(1, state.car.speed / cfg.fullSpeed), 7 * u);
 
-    // --- Steering angle readout, bottom right -----------------------------
-    var gw = 190, gh = 46;
-    var gx = canvas.width - gw - pad, gy = canvas.height - gh - pad;
-    panel(ctx, gx, gy, gw, gh);
+    var gx = view.w - bw - pad;
+    panel(ctx, gx, by, bw, bh);
     ctx.textAlign = 'left';
-    ctx.font = '11px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(11 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText('ANGLE TO ROAD', gx + 12, gy + 8);
+    ctx.fillText(view.w < 420 ? 'ANGLE' : 'ANGLE TO ROAD', gx + 11 * u, by + 7 * u);
 
     var deg = (state.car.steerOffset || 0) * 180 / Math.PI;
     ctx.textAlign = 'right';
-    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+    ctx.font = font(14 * u, true);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText((deg >= 0 ? '+' : '') + deg.toFixed(0) + '°', gx + gw - 12, gy + 6);
+    ctx.fillText((deg >= 0 ? '+' : '') + deg.toFixed(0) + '°', gx + bw - 11 * u, by + 5 * u);
 
-    var mid = gx + gw / 2;
+    var mid = gx + bw / 2;
+    var half = (bw - 22 * u) / 2;
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(gx + 12, gy + 28, gw - 24, 8);
-    var half = (gw - 24) / 2;
+    ctx.fillRect(gx + 11 * u, by + bh - 15 * u, bw - 22 * u, 7 * u);
     var norm = Math.max(-1, Math.min(1, deg / cfg.turningAngleDeg));
     ctx.fillStyle = '#c9a0ff';
-    if (norm >= 0) ctx.fillRect(mid, gy + 28, half * norm, 8);
-    else ctx.fillRect(mid + half * norm, gy + 28, -half * norm, 8);
+    if (norm >= 0) ctx.fillRect(mid, by + bh - 15 * u, half * norm, 7 * u);
+    else ctx.fillRect(mid + half * norm, by + bh - 15 * u, -half * norm, 7 * u);
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillRect(mid - 1, gy + 25, 2, 14);
+    ctx.fillRect(mid - 1, by + bh - 18 * u, 2, 13 * u);
 
     // --- Off-road warning / recovery notice -------------------------------
     if (state.phase === 'racing') {
       ctx.textAlign = 'center';
-      ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+      ctx.font = font(19 * u, true);
+      var noticeY = by - 30 * u;
       if (state.car.recoverFlash > 0) {
         ctx.fillStyle = '#7ec8f2';
-        ctx.fillText('BACK ON TRACK', canvas.width / 2, canvas.height - 96);
+        ctx.fillText('BACK ON TRACK', view.w / 2, noticeY);
       } else if (state.car.offRoad) {
         ctx.fillStyle = '#ffcf5c';
         var secs = Math.max(0, cfg.offRoadResetSeconds - state.car.offRoadTimer);
         ctx.fillText(cfg.offRoadResetSeconds > 0
-          ? 'OFF TRACK \u2014 ' + secs.toFixed(1) + 's'
-          : 'OFF TRACK', canvas.width / 2, canvas.height - 96);
+          ? 'OFF TRACK — ' + secs.toFixed(1) + 's'
+          : 'OFF TRACK', view.w / 2, noticeY);
       }
     }
 
-    // --- Countdown / finish banner ---------------------------------------
+    // --- Countdown --------------------------------------------------------
     if (state.phase === 'countdown') {
       var n = Math.ceil(state.countdown);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = 'bold 96px "Segoe UI", Arial, sans-serif';
+      ctx.font = font(Math.min(view.w, view.h) * 0.17, true);
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.fillText(n > 0 ? String(n) : 'GO!', canvas.width / 2 + 3, canvas.height / 2 + 3);
+      ctx.fillText(n > 0 ? String(n) : 'GO!', view.w / 2 + 3, view.h / 2 + 3);
       ctx.fillStyle = n > 0 ? '#ffffff' : '#7ef2a6';
-      ctx.fillText(n > 0 ? String(n) : 'GO!', canvas.width / 2, canvas.height / 2);
+      ctx.fillText(n > 0 ? String(n) : 'GO!', view.w / 2, view.h / 2);
       ctx.textBaseline = 'top';
     }
 

@@ -41,20 +41,31 @@
     return ctx.createPattern(tile, 'repeat');
   }
 
-  function Renderer(canvas, cfg, track) {
+  function Renderer(canvas, cfg, track, viewport) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.cfg = cfg;
     this.track = track;
+    this.viewport = viewport;
     this.grass = makeGrassPattern(this.ctx);
     this.camera = { x: track.start.x, y: track.start.y };
   }
 
   Renderer.prototype.updateCamera = function (car, dt, snap) {
     var cfg = this.cfg;
-    var ahead = this.canvas.height * cfg.lookAhead * (car.speed / cfg.fullSpeed);
-    var tx = car.x + Math.cos(car.heading) * ahead;
-    var ty = car.y + Math.sin(car.heading) * ahead;
+    var vp = this.viewport;
+
+    // Look-ahead is taken PER AXIS, each as a fraction of however much world
+    // that axis can see. This keeps the car in the same place on screen on
+    // every display (at most 2 x lookAhead of the half-extent from centre,
+    // whatever the resolution) while a tall portrait phone still gets to use
+    // its height: 38% of 1298 visible world px is far more road ahead than 38%
+    // of a desktop's 600. A single distance along the heading does neither —
+    // fixed, it wasted half a portrait screen on empty road behind; scaled by
+    // the combined extent, a diagonal heading shoved the car off the side.
+    var frac = car.speed / cfg.fullSpeed;
+    var tx = car.x + Math.cos(car.heading) * cfg.lookAhead * vp.worldWidth() * frac;
+    var ty = car.y + Math.sin(car.heading) * cfg.lookAhead * vp.worldHeight() * frac;
 
     if (snap) {
       this.camera.x = tx;
@@ -71,10 +82,12 @@
   Renderer.prototype.visibleRange = function () {
     var pts = this.track.points;
     var margin = this.track.halfWidth + 80;
-    var left = this.camera.x - this.canvas.width / 2 - margin;
-    var right = this.camera.x + this.canvas.width / 2 + margin;
-    var top = this.camera.y - this.canvas.height / 2 - margin;
-    var bottom = this.camera.y + this.canvas.height / 2 + margin;
+    var halfW = this.viewport.worldWidth() / 2;
+    var halfH = this.viewport.worldHeight() / 2;
+    var left = this.camera.x - halfW - margin;
+    var right = this.camera.x + halfW + margin;
+    var top = this.camera.y - halfH - margin;
+    var bottom = this.camera.y + halfH + margin;
 
     var first = -1, last = -1;
     for (var i = 0; i < pts.length; i++) {
@@ -174,20 +187,25 @@
 
   Renderer.prototype.drawWorld = function (car) {
     var ctx = this.ctx;
-    var cw = this.canvas.width;
-    var ch = this.canvas.height;
+    var vp = this.viewport;
 
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Work in CSS pixels; the device pixel ratio is folded into the transform
+    // so nothing else in the renderer has to know about it.
+    ctx.setTransform(vp.dpr, 0, 0, vp.dpr, 0, 0);
+    ctx.clearRect(0, 0, vp.w, vp.h);
 
-    // Grass, scrolled with the camera so it reads as motion.
+    // World transform: centre on the camera, then scale world units to screen.
     ctx.save();
-    ctx.translate(-this.camera.x + cw / 2, -this.camera.y + ch / 2);
+    ctx.translate(vp.w / 2, vp.h / 2);
+    ctx.scale(vp.scale, vp.scale);
+    ctx.translate(-this.camera.x, -this.camera.y);
+
+    // Grass over the visible world rect. The pattern lives in world space, so
+    // it scrolls with the camera and scales with everything else.
+    var ww = vp.worldWidth();
+    var wh = vp.worldHeight();
     ctx.fillStyle = this.grass;
-    ctx.fillRect(this.camera.x - cw / 2, this.camera.y - ch / 2, cw, ch);
-    ctx.restore();
-
-    ctx.translate(cw / 2 - this.camera.x, ch / 2 - this.camera.y);
+    ctx.fillRect(this.camera.x - ww / 2, this.camera.y - wh / 2, ww, wh);
 
     var range = this.visibleRange();
     if (range) {

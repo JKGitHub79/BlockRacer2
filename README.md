@@ -5,7 +5,8 @@ the only thing you control is the wheel. Beat the qualifying time.
 
 ![Track 1](docs/racing.png)
 
-<img src="docs/mobile.png" alt="Phone portrait" width="260">
+<img src="docs/grid.png" alt="Starting grid" width="420">
+<img src="docs/mobile.png" alt="Phone portrait" width="200">
 
 ## Running it
 
@@ -203,6 +204,50 @@ A clean lap is about **39.7s** (the racing line cuts inside the centreline on
 twelve corners, so it beats the 40s the centreline would take), leaving ~11%
 slack — the same proportional margin every earlier version had.
 
+## AI cars
+
+**AI Cars** puts 5–100 opponents on the starting grid, four abreast up the road
+ahead of you — so you line up **last** and work through the field. They run the
+same physics as the player: same `Car`, same steering model, same Turning Angle
+clamp, same grass penalty. What differs is the driver, a proportional
+controller aiming at the road ahead and correcting onto its own lane.
+
+Each car gets its own top speed, spread evenly between `aiSpeedMin` and
+`aiSpeedMax` (0.72–0.96 of Full Speed) from a fixed seed, so the field strings
+out, a given car count always produces the same field, and a clean lap carries
+you through — while time lost on the grass hands places straight back.
+
+Two behaviours turned out to be essential, and neither was obvious up front:
+
+* **Car following.** Without it a faster car simply drives through a slower
+  one, and a hundred cars collapsed into a single overlapping heap. Cars now
+  give up speed in proportion to the gap to the car ahead in their lane.
+* **Overtaking.** Car following *alone* turns the field into a traffic jam —
+  measured, the tail of a 40-car field was crawling at 5% of its pace after
+  fifteen seconds, nose-to-tail. A held-up car now moves to a clear lane. With
+  it the field holds 78–93% of its own pace even at 100 cars.
+
+Measured behaviour, from `tools/simulate.js`:
+
+| Cars | Off-road | Overlapping | Field pace |
+| --- | --- | --- | --- |
+| 5 | 3.0% | 0.00% | 93% |
+| 12 | 1.9% | 0.04% | 92% |
+| 40 | 1.4% | 0.01% | 83% |
+| 100 | 0.5% | 0.00% | 78% |
+
+"Overlapping" is the share of all car-pair observations closer than a car's
+width. A single worst-case minimum is the wrong measure here — any lane change
+briefly brings two cars within about 30px, which is racing, not a pile-up.
+
+**They do not collide**, with each other or with you. That is the significant
+limitation: you can drive through the field rather than having to find a way
+past it, and it is why the qualifying time is unaffected by the car count.
+Adding collisions would change the game substantially and would need the
+qualifying time re-tuned around it.
+
+Frame time with 100 cars is 0.8ms on a phone viewport against a 16.7ms budget.
+
 ## Going off the road
 
 Grass holds the car to **Grass Slowdown** percent below Full Speed — 50% by
@@ -235,6 +280,7 @@ The four headline settings are on the title screen **and** in `config.js`:
 | Steering Speed | 280°/s | 60–6000 |
 | Straighten Speed | 170°/s | 30–400 |
 | Grass Slowdown | 50% | 0–90% |
+| AI Cars | 12 | 5–100 |
 | No. Laps | 1 | 1–20 |
 | Full Speed | 420 px/s | 120–1200 |
 
@@ -274,8 +320,11 @@ the surviving fraction; `BR.deriveConfig` works that out, and everything that
 builds a config — the title screen, saved settings and the headless harness —
 goes through it, so they cannot drift apart.
 
-`config.js` also holds the off-road recovery, car and road dimensions, the
-visual tuning, and the Track 1 section list itself.
+`config.js` also holds the off-road recovery, the AI speed spread and grid
+layout, car and road dimensions, the visual tuning, and the Track 1 section
+list itself. The AI count has no 0 setting — the range is 5–100 as specified;
+to race alone, set `aiCars: 0` in `config.js` and widen its `CONFIG_LIMITS`
+minimum to match.
 
 ## Tests
 

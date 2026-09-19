@@ -110,6 +110,9 @@
     // --- Speed (automatic; there is no throttle or brake) -----------------
     var accel = cfg.fullSpeed / cfg.accelerationTime;
     var targetSpeed = this.offRoad ? cfg.fullSpeed * cfg.offRoadSpeedFactor : cfg.fullSpeed;
+    // AI cars set this each step to avoid driving through the car in front.
+    // The player never sets it, so nothing caps them.
+    if (this.speedLimit !== undefined) targetSpeed = Math.min(targetSpeed, this.speedLimit);
 
     if (this.speed < targetSpeed) {
       this.speed = Math.min(targetSpeed, this.speed + accel * dt);
@@ -122,7 +125,8 @@
     this.y += Math.sin(this.heading) * this.speed * dt;
 
     // --- Re-locate against the track --------------------------------------
-    this.loc = BR.track.locate(this.track, this.x, this.y, this.hint);
+    this.loc = BR.track.locate(this.track, this.x, this.y, this.hint,
+                               this.searchBehind, this.searchAhead);
     this.hint = this.loc.index;
     this.offRoad = Math.abs(this.loc.lateral) > this.track.halfWidth;
 

@@ -91,19 +91,36 @@
     ctx.fillStyle = ahead ? '#7ef2a6' : '#ff7676';
     ctx.fillRect(x + 11 * u, y + h - 15 * u, (w - 22 * u) * frac, 6 * u);
 
-    // --- Lap counter ------------------------------------------------------
-    if (cfg.laps > 1) {
-      var lh = Math.round(28 * u);
-      panel(ctx, x, y + h + 8 * u, w, lh);
+    // --- Position, then lap counter --------------------------------------
+    var stackY = y + h + 8 * u;
+    var rowH = Math.round(28 * u);
+
+    if (state.fieldSize > 0) {
+      panel(ctx, x, stackY, w, rowH);
       ctx.textAlign = 'left';
       ctx.font = font(11 * u);
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillText('LAP', x + 11 * u, y + h + 16 * u);
+      ctx.fillText('POSITION', x + 11 * u, stackY + 8 * u);
+      ctx.textAlign = 'right';
+      ctx.font = font(15 * u, true);
+      // Leading is worth calling out; everything else is just a number.
+      ctx.fillStyle = state.position === 1 ? '#7ef2a6' : '#ffffff';
+      ctx.fillText(state.position + ' / ' + (state.fieldSize + 1),
+                   x + w - 11 * u, stackY + 6 * u);
+      stackY += rowH + 6 * u;
+    }
+
+    if (cfg.laps > 1) {
+      panel(ctx, x, stackY, w, rowH);
+      ctx.textAlign = 'left';
+      ctx.font = font(11 * u);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillText('LAP', x + 11 * u, stackY + 8 * u);
       ctx.textAlign = 'right';
       ctx.font = font(15 * u, true);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(Math.min(state.lap, cfg.laps) + ' / ' + cfg.laps,
-                   x + w - 11 * u, y + h + 14 * u);
+                   x + w - 11 * u, stackY + 6 * u);
     }
 
     // --- Bottom panels: speed (left) and steering angle (right) -----------

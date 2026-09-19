@@ -23,7 +23,7 @@ var sandbox = { Math: Math, console: console };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 
-['config.js', 'src/track.js', 'src/car.js'].forEach(function (file) {
+['config.js', 'src/track.js', 'src/car.js', 'src/ai.js'].forEach(function (file) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), sandbox, { filename: file });
 });
 
@@ -389,6 +389,113 @@ check('one excursion eats most of the qualifying margin',
 // One mistake on a 40s lap is survivable by design; two are not.
 check('two excursions lose qualifying', twoOff > target,
       twoOff.toFixed(2) + 's vs ' + target.toFixed(2) + 's');
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 10. AI cars ===\n');
+
+/* Runs a field for `seconds` and reports how it behaved. The player is not
+ * simulated here: AI cars do not collide with anything, so they cannot affect
+ * a player lap, which is why sections 1-9 stay valid with a field on track. */
+function runField(count, seconds) {
+  var cfg = makeConfig({ aiCars: count });
+  var track = BR.track.build(cfg);
+  var field = BR.ai.buildField(cfg, track);
+
+  var t = 0, offRoadSamples = 0, samples = 0, worstGap = Infinity;
+  var pairSamples = 0, overlapping = 0, speedSum = 0, speedCount = 0;
+
+  while (t < seconds) {
+    BR.ai.updateField(field, track, STEP);
+    t += STEP;
+
+    // Sample occasionally: checking every pair every step is needlessly slow.
+    if (Math.round(t / STEP) % 60 !== 0) continue;
+    samples++;
+    for (var i = 0; i < field.length; i++) {
+      if (field[i].offRoad) offRoadSamples++;
+      if (!field[i].finished) {
+        speedSum += field[i].speed / field[i].cfg.fullSpeed;
+        speedCount++;
+      }
+      for (var j = i + 1; j < field.length; j++) {
+        var d = Math.hypot(field[i].x - field[j].x, field[i].y - field[j].y);
+        pairSamples++;
+        // Cars are 32px wide, so centres closer than that overlap whatever
+        // their orientation.
+        if (d < cfg.carWidth) overlapping++;
+        if (d < worstGap) worstGap = d;
+      }
+    }
+  }
+
+  var moved = 0, stuck = 0;
+  field.forEach(function (c) {
+    if (c.loc.s > cfg.gridStartGap + 200) moved++;
+    if (c.speed < 5 && !c.finished) stuck++;
+  });
+
+  return {
+    cfg: cfg, track: track, field: field,
+    offRoadPct: 100 * offRoadSamples / Math.max(1, samples * field.length),
+    overlapPct: 100 * overlapping / Math.max(1, pairSamples),
+    avgSpeedPct: 100 * speedSum / Math.max(1, speedCount),
+    worstGap: worstGap, moved: moved, stuck: stuck
+  };
+}
+
+console.log('  cars   placed   off-road   overlapping   avg pace   closest');
+[5, 12, 40, 100].forEach(function (count) {
+  var r = runField(count, count > 40 ? 12 : 20);
+  console.log('  ' + String(count).padEnd(7) + String(r.field.length).padEnd(9) +
+              (r.offRoadPct.toFixed(1) + '%').padEnd(11) +
+              (r.overlapPct.toFixed(2) + '%').padEnd(14) +
+              (r.avgSpeedPct.toFixed(0) + '%').padEnd(11) +
+              r.worstGap.toFixed(0) + 'px');
+
+  check(count + ' cars: the whole field makes it onto the grid',
+        r.field.length === count, r.field.length + ' placed');
+  check(count + ' cars: the field keeps to the road',
+        r.offRoadPct < 4.0, r.offRoadPct.toFixed(2) + '% of samples');
+  // Momentary close quarters while a car changes lane is racing; cars sitting
+  // inside each other is a pile-up. Measured as a share of all pair
+  // observations rather than a single worst case, which any lane change trips.
+  check(count + ' cars: cars do not sit on top of each other',
+        r.overlapPct < 0.5, r.overlapPct.toFixed(2) + '% of pair samples');
+  // Catches the traffic jam that car following alone produced, where the tail
+  // of the field crawled at 5% of its pace.
+  check(count + ' cars: the field keeps racing rather than queueing',
+        r.avgSpeedPct > 60, r.avgSpeedPct.toFixed(0) + '% of their own pace');
+  check(count + ' cars: none are left stranded',
+        r.stuck === 0 && r.moved === r.field.length,
+        r.moved + ' of ' + r.field.length + ' under way');
+});
+
+// The grid must fit on the road, not just in theory.
+(function () {
+  var r = runField(100, 0.1);
+  var lanes = r.field.map(function (c) { return Math.abs(c.loc.lateral); });
+  var widest = Math.max.apply(null, lanes);
+  console.log('');
+  check('a 100-car grid fits inside the road',
+        widest < r.track.halfWidth, widest.toFixed(0) + 'px from centre, edge at ' +
+        r.track.halfWidth);
+  // The player lines up on the line with the field ahead, so they start last.
+  check('the player starts at the back of the grid',
+        BR.ai.playerPosition(r.field, 0) === r.field.length + 1,
+        'P' + BR.ai.playerPosition(r.field, 0) + ' of ' + (r.field.length + 1));
+})();
+
+// Speeds must spread, or the field moves as one block.
+(function () {
+  var r = runField(40, 0.1);
+  var speeds = r.field.map(function (c) { return c.cfg.fullSpeed; });
+  var lo = Math.min.apply(null, speeds), hi = Math.max.apply(null, speeds);
+  check('the field has a spread of top speeds',
+        hi - lo > r.cfg.fullSpeed * 0.15,
+        lo.toFixed(0) + '-' + hi.toFixed(0) + ' px/s vs the player\'s ' + r.cfg.fullSpeed);
+  check('no AI car is faster than the player',
+        hi <= r.cfg.fullSpeed, 'quickest ' + hi.toFixed(0) + ' px/s');
+})();
 
 console.log('');
 if (failures.length) {

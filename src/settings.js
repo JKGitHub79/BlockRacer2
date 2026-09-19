@@ -8,7 +8,8 @@
 
   // Only these may be overridden from the title screen.
   var OVERRIDABLE = ['turningAngleDeg', 'accelerationTime', 'laps', 'fullSpeed',
-                     'steerRateDeg', 'returnRateDeg', 'grassSlowdownPct'];
+                     'steerRateDeg', 'returnRateDeg', 'grassSlowdownPct',
+                     'aiCars'];
 
   function clampValue(key, value) {
     var lim = BR.CONFIG_LIMITS[key];

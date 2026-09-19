@@ -45,9 +45,13 @@
     this.viewport.cfg = this.cfg;
     this.viewport.measure();
     this.renderer = new BR.Renderer(this.canvas, this.cfg, this.track, this.viewport);
+    this.field = BR.ai.buildField(this.cfg, this.track);
     this.renderer.updateCamera(this.car, 0, true);
     this.elapsed = 0;
     this.lap = 1;
+    // Worked out from the grid rather than assumed: the player starts on the
+    // line with the whole field ahead, so they line up LAST, not first.
+    this.position = BR.ai.playerPosition(this.field, this.car.loc.s);
     this.countdown = COUNTDOWN;
   };
 
@@ -203,6 +207,7 @@
     return {
       turningAngleDeg:  document.getElementById('cfg-turning-angle'),
       accelerationTime: document.getElementById('cfg-acceleration'),
+      aiCars:           document.getElementById('cfg-ai-cars'),
       laps:             document.getElementById('cfg-laps'),
       fullSpeed:        document.getElementById('cfg-full-speed'),
       steerRateDeg:     document.getElementById('cfg-steer-rate'),
@@ -257,6 +262,11 @@
       case 'fullSpeed':
         return Math.round(cfg.fullSpeed * Math.sin(cfg.turningAngleDeg * Math.PI / 180))
              + ' px/s across';
+      case 'aiCars':
+        // How much road the grid occupies, which is what the number means on
+        // track: 100 cars is a field stretching well up the first straight.
+        var rows = Math.ceil(value / cfg.gridPerRow);
+        return (cfg.gridStartGap + (rows - 1) * cfg.gridRowSpacing) + 'px of grid';
       case 'grassSlowdownPct':
         // What the penalty actually leaves you with, in the same units as the
         // in-race speed readout.
@@ -380,11 +390,14 @@
 
     this.elapsed += dt;
     this.car.update(dt, this.steerInput());
+    BR.ai.updateField(this.field, this.track, dt);
+    this.position = BR.ai.playerPosition(this.field, this.car.loc.s);
 
     if (this.car.hasFinishedLap()) {
       if (this.lap >= this.cfg.laps) { this.finish(); return; }
       this.lap += 1;
       this.car.startNewLap();
+      this.field = BR.ai.buildField(this.cfg, this.track);
       this.renderer.updateCamera(this.car, 0, true);
     }
   };
@@ -403,7 +416,7 @@
 
     var animating = this.phase === 'racing' || this.phase === 'countdown';
     this.renderer.updateCamera(this.car, animating ? frameTime : 0, !animating);
-    this.renderer.drawWorld(this.car);
+    this.renderer.drawWorld(this.car, this.field);
 
     if (this.phase !== 'title') {
       BR.hud.draw(this.canvas.getContext('2d'), this.viewport, {
@@ -411,7 +424,9 @@
         lap: this.lap,
         car: this.car,
         phase: this.phase,
-        countdown: this.countdown
+        countdown: this.countdown,
+        position: this.position,
+        fieldSize: this.field.length
       }, this.cfg, this.track);
     }
 

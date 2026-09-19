@@ -47,11 +47,16 @@
   }
 
   /* Nearest point on the centreline, searched in a window around `hint` so a
-   * car that doubles back cannot teleport to a far-away part of the track. */
-  function locate(track, px, py, hint) {
+   * car that doubles back cannot teleport to a far-away part of the track.
+   *
+   * `behind` and `ahead` size that window in samples. The defaults are roomy
+   * enough for a player car that has been flung well off line; AI cars stay
+   * near the racing line and there can be a hundred of them, so they pass a
+   * much tighter window — the search is the per-car cost that matters. */
+  function locate(track, px, py, hint, behind, ahead) {
     var pts = track.points;
-    var lo = Math.max(0, (hint | 0) - 60);
-    var hi = Math.min(pts.length - 1, (hint | 0) + 240);
+    var lo = Math.max(0, (hint | 0) - (behind === undefined ? 60 : behind));
+    var hi = Math.min(pts.length - 1, (hint | 0) + (ahead === undefined ? 240 : ahead));
 
     var bestIndex = lo;
     var bestDist = Infinity;

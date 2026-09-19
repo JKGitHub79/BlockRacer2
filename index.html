@@ -236,6 +236,19 @@
         </div>
       </div>
       <div class="setting">
+        <label for="cfg-ai-cars">AI Cars
+          <em>Opponents on the starting grid, five abreast up the road ahead
+              of you</em></label>
+        <div class="slider-wrap">
+          <input type="range" id="cfg-ai-cars">
+          <div class="scale"><span id="cfg-ai-cars-min"></span><span id="cfg-ai-cars-max"></span></div>
+        </div>
+        <div class="readout">
+          <output id="cfg-ai-cars-value"></output>
+          <span class="hint" id="cfg-ai-cars-hint"></span>
+        </div>
+      </div>
+      <div class="setting">
         <label for="cfg-laps">No. Laps
           <em>Qualifying time scales with lap count</em></label>
         <div class="slider-wrap">
@@ -303,6 +316,7 @@
 <script src="src/viewport.js"></script>
 <script src="src/track.js"></script>
 <script src="src/car.js"></script>
+<script src="src/ai.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>
 <script src="src/game.js"></script>

@@ -299,7 +299,22 @@
     }
   };
 
-  Renderer.prototype.drawCar = function (car) {
+  Renderer.prototype.drawField = function (field) {
+    var vp = this.viewport;
+    var pad = 80;
+    var left = this.camera.x - vp.worldWidth() / 2 - pad;
+    var right = this.camera.x + vp.worldWidth() / 2 + pad;
+    var top = this.camera.y - vp.worldHeight() / 2 - pad;
+    var bottom = this.camera.y + vp.worldHeight() / 2 + pad;
+
+    for (var i = 0; i < field.length; i++) {
+      var c = field[i];
+      if (c.x < left || c.x > right || c.y < top || c.y > bottom) continue;
+      this.drawCar(c, c.colour);
+    }
+  };
+
+  Renderer.prototype.drawCar = function (car, colour) {
     var ctx = this.ctx;
     var L = this.cfg.carLength;
     var W = this.cfg.carWidth;
@@ -313,7 +328,7 @@
     ctx.fillRect(-L / 2 + 3, -W / 2 + 4, L, W);
 
     // Body
-    ctx.fillStyle = COLOURS.carBody;
+    ctx.fillStyle = colour || COLOURS.carBody;
     ctx.fillRect(-L / 2, -W / 2, L, W);
 
     // Wheels
@@ -332,7 +347,7 @@
     ctx.restore();
   };
 
-  Renderer.prototype.drawWorld = function (car) {
+  Renderer.prototype.drawWorld = function (car, field) {
     var ctx = this.ctx;
     var vp = this.viewport;
 
@@ -392,7 +407,8 @@
     this.drawMarkers();
     this.drawLine(this.track.start, false);
     this.drawLine(this.track.finish, true);
-    this.drawCar(car);
+    if (field) this.drawField(field);
+    this.drawCar(car);   // the player is drawn last, so never hidden by traffic
 
     ctx.restore();
   };

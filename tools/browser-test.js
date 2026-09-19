@@ -67,8 +67,11 @@ function gameState(page) {
         laps: g.cfg.laps, fullSpeed: g.cfg.fullSpeed,
         steerRateDeg: g.cfg.steerRateDeg, returnRateDeg: g.cfg.returnRateDeg,
         grassSlowdownPct: g.cfg.grassSlowdownPct,
-        offRoadSpeedFactor: g.cfg.offRoadSpeedFactor
+        offRoadSpeedFactor: g.cfg.offRoadSpeedFactor,
+        aiCars: g.cfg.aiCars
       },
+      fieldSize: g.field.length,
+      position: g.position,
       view: {
         w: vp.w, h: vp.h, dpr: vp.dpr, scale: vp.scale, ui: vp.ui, touch: vp.touch,
         worldW: vp.worldWidth(), worldH: vp.worldHeight(),
@@ -168,7 +171,8 @@ function sectionTitleAndRace() {
       { id: 'cfg-full-speed',    key: 'fullSpeed',        set: '600',  shows: '600 px/s' },
       { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '6000', shows: '6000°/s' },
       { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120',  shows: '120°/s' },
-      { id: 'cfg-grass-slowdown', key: 'grassSlowdownPct', set: '75',   shows: '75%' }
+      { id: 'cfg-grass-slowdown', key: 'grassSlowdownPct', set: '75',   shows: '75%' },
+      { id: 'cfg-ai-cars',      key: 'aiCars',          set: '40',   shows: '40' }
     ];
 
     var chain = Promise.resolve();
@@ -192,7 +196,7 @@ function sectionTitleAndRace() {
     return page.evaluate(function () {
       var ids = ['cfg-turning-angle', 'cfg-acceleration', 'cfg-steer-rate',
                  'cfg-return-rate', 'cfg-laps', 'cfg-full-speed',
-                 'cfg-grass-slowdown'];
+                 'cfg-grass-slowdown', 'cfg-ai-cars'];
       var out = {};
       ids.forEach(function (id) {
         out[id] = {
@@ -233,7 +237,7 @@ function sectionTitleAndRace() {
           s.cfg.turningAngleDeg === 45 && s.cfg.accelerationTime === 2 &&
           s.cfg.laps === 1 && s.cfg.fullSpeed === 420 &&
           s.cfg.steerRateDeg === 280 && s.cfg.returnRateDeg === 170 &&
-          s.cfg.grassSlowdownPct === 50,
+          s.cfg.grassSlowdownPct === 50 && s.cfg.aiCars === 12,
           JSON.stringify(s.cfg));
     // The physics value has to follow the title-screen percentage.
     check('Grass Slowdown drives the physics factor',
@@ -250,6 +254,11 @@ function sectionTitleAndRace() {
   }).then(function () {
     return gameState(page);
   }).then(function (s) {
+    check('the AI field is built to the configured size',
+          s.fieldSize === s.cfg.aiCars, s.fieldSize + ' cars for a setting of ' + s.cfg.aiCars);
+    // The grid sits ahead of the player, so they line up last.
+    check('the player starts at the back of the grid',
+          s.position === s.fieldSize + 1, 'P' + s.position + ' of ' + (s.fieldSize + 1));
     check('countdown holds the car still before GO',
           s.phase === 'countdown' && s.speed === 0 && s.elapsed === 0,
           s.phase + ' speed=' + s.speed.toFixed(0));

@@ -74,6 +74,33 @@ BR.DEFAULT_CONFIG = {
   returnRateDeg: 170,
 
 
+  /* --- AI cars (title screen + file) --------------------------------------- */
+
+  // How many AI cars line up on the grid. They run the same physics as the
+  // player and each gets its own top speed and lane.
+  aiCars: 12,
+
+  // Their top speeds, as fractions of Full Speed, spread evenly across the
+  // field. Deliberately below 1: a clean lap should carry you through the
+  // field, while time lost on the grass hands places back.
+  aiSpeedMin: 0.72,
+  aiSpeedMax: 0.96,
+
+  // Fixed seed, so a given car count always produces the same field and lap
+  // times stay reproducible.
+  aiSeed: 20260919,
+
+  // Starting grid layout. Rows run up the road ahead of the player, who starts
+  // on the line at s = 0.
+  //
+  // Four abreast, not five: cars race a narrower spread than they grid on (so
+  // the outer ones do not corner onto the grass), and at five the racing lanes
+  // end up 29px apart against a 32px car width — side-by-side cars overlap.
+  // Four leaves ~41px between racing lanes.
+  gridPerRow: 4,
+  gridRowSpacing: 95,
+  gridStartGap: 80,
+
   /* --- Off-road penalty (title screen + file) ------------------------------ */
 
   // Grass Slowdown: how much speed the grass costs you, as a percentage. At 50
@@ -218,7 +245,8 @@ BR.CONFIG_LIMITS = {
   fullSpeed:        { min: 120, max: 1200, step: 10 },
   steerRateDeg:     { min: 60,  max: 6000, step: 10 },
   returnRateDeg:    { min: 30,  max: 400,  step: 10 },
-  grassSlowdownPct: { min: 0,   max: 90,   step: 5 }
+  grassSlowdownPct: { min: 0,   max: 90,   step: 5 },
+  aiCars:           { min: 5,   max: 100,  step: 1 }
 };
 
 /* Values worked out from the settings above rather than set directly.

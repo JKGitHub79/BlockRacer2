@@ -46,6 +46,7 @@
     this.viewport.measure();
     this.renderer = new BR.Renderer(this.canvas, this.cfg, this.track, this.viewport);
     this.field = BR.ai.buildField(this.cfg, this.track);
+    BR.collision.reset(this.car, this.field);
     this.renderer.updateCamera(this.car, 0, true);
     this.elapsed = 0;
     this.lap = 1;
@@ -207,12 +208,14 @@
     return {
       turningAngleDeg:  document.getElementById('cfg-turning-angle'),
       accelerationTime: document.getElementById('cfg-acceleration'),
+      lanes:            document.getElementById('cfg-lanes'),
       aiCars:           document.getElementById('cfg-ai-cars'),
       laps:             document.getElementById('cfg-laps'),
       fullSpeed:        document.getElementById('cfg-full-speed'),
       steerRateDeg:     document.getElementById('cfg-steer-rate'),
       returnRateDeg:    document.getElementById('cfg-return-rate'),
-      grassSlowdownPct: document.getElementById('cfg-grass-slowdown')
+      grassSlowdownPct: document.getElementById('cfg-grass-slowdown'),
+      slideDistance:    document.getElementById('cfg-slide-distance')
     };
   };
 
@@ -262,6 +265,12 @@
       case 'fullSpeed':
         return Math.round(cfg.fullSpeed * Math.sin(cfg.turningAngleDeg * Math.PI / 180))
              + ' px/s across';
+      case 'lanes':
+        return cfg.roadWidth + 'px road';
+      case 'slideDistance':
+        // Expressed in lanes, which is what it costs you on track.
+        if (value === 0) return 'no slide';
+        return (value / cfg.laneWidth).toFixed(1) + ' lanes wide';
       case 'aiCars':
         // How much road the grid occupies, which is what the number means on
         // track: 100 cars is a field stretching well up the first straight.
@@ -283,6 +292,7 @@
     if (key === 'fullSpeed') return value + ' px/s';
     if (key === 'steerRateDeg' || key === 'returnRateDeg') return value + '\u00B0/s';
     if (key === 'grassSlowdownPct') return value + '%';
+    if (key === 'slideDistance') return value + 'px';
     return String(value);
   };
 
@@ -322,8 +332,9 @@
         BR.deriveConfig(self.cfg);
         self.renderValue(key, el, value);
         // Turning Angle and Full Speed feed each other's derived readouts.
-        if (key === 'turningAngleDeg' || key === 'fullSpeed') {
-          ['turningAngleDeg', 'steerRateDeg', 'fullSpeed', 'grassSlowdownPct'].forEach(function (other) {
+        if (key === 'turningAngleDeg' || key === 'fullSpeed' || key === 'lanes') {
+          ['turningAngleDeg', 'steerRateDeg', 'fullSpeed', 'grassSlowdownPct',
+           'lanes', 'aiCars', 'slideDistance'].forEach(function (other) {
             var oel = fields[other];
             if (oel && other !== key) self.renderValue(other, oel, self.cfg[other]);
           });
@@ -391,6 +402,9 @@
     this.elapsed += dt;
     this.car.update(dt, this.steerInput());
     BR.ai.updateField(this.field, this.track, dt);
+    // After both have moved, so contacts are tested against final positions.
+    BR.collision.resolve(this.car, this.field, this.cfg);
+    if (this.car.bumpFlash > 0) this.car.bumpFlash -= dt;
     this.position = BR.ai.playerPosition(this.field, this.car.loc.s);
 
     if (this.car.hasFinishedLap()) {
@@ -398,6 +412,7 @@
       this.lap += 1;
       this.car.startNewLap();
       this.field = BR.ai.buildField(this.cfg, this.track);
+      BR.collision.reset(this.car, this.field);
       this.renderer.updateCamera(this.car, 0, true);
     }
   };

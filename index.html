@@ -223,6 +223,19 @@
         </div>
       </div>
       <div class="setting">
+        <label for="cfg-slide-distance">Slide Distance
+          <em>How far the car keeps drifting sideways after you stop turning
+              at top speed. 0 disables it</em></label>
+        <div class="slider-wrap">
+          <input type="range" id="cfg-slide-distance">
+          <div class="scale"><span id="cfg-slide-distance-min"></span><span id="cfg-slide-distance-max"></span></div>
+        </div>
+        <div class="readout">
+          <output id="cfg-slide-distance-value"></output>
+          <span class="hint" id="cfg-slide-distance-hint"></span>
+        </div>
+      </div>
+      <div class="setting">
         <label for="cfg-grass-slowdown">Grass Slowdown
           <em>How much speed the grass costs you. At 0 the road edges
               stop mattering</em></label>
@@ -236,9 +249,22 @@
         </div>
       </div>
       <div class="setting">
+        <label for="cfg-lanes">Lanes
+          <em>Widens the road; dividers, the grid and the AI racing lanes
+              all follow</em></label>
+        <div class="slider-wrap">
+          <input type="range" id="cfg-lanes">
+          <div class="scale"><span id="cfg-lanes-min"></span><span id="cfg-lanes-max"></span></div>
+        </div>
+        <div class="readout">
+          <output id="cfg-lanes-value"></output>
+          <span class="hint" id="cfg-lanes-hint"></span>
+        </div>
+      </div>
+      <div class="setting">
         <label for="cfg-ai-cars">AI Cars
-          <em>Opponents on the starting grid, five abreast up the road ahead
-              of you</em></label>
+          <em>Opponents on the grid, one per lane per row, up the road
+              ahead of you</em></label>
         <div class="slider-wrap">
           <input type="range" id="cfg-ai-cars">
           <div class="scale"><span id="cfg-ai-cars-min"></span><span id="cfg-ai-cars-max"></span></div>
@@ -317,6 +343,7 @@
 <script src="src/track.js"></script>
 <script src="src/car.js"></script>
 <script src="src/ai.js"></script>
+<script src="src/collision.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>
 <script src="src/game.js"></script>

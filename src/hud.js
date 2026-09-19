@@ -175,7 +175,10 @@
       ctx.textAlign = 'center';
       ctx.font = font(19 * u, true);
       var noticeY = by - 30 * u;
-      if (state.car.recoverFlash > 0) {
+      if (state.car.bumpFlash > 0) {
+        ctx.fillStyle = '#ff8a6b';
+        ctx.fillText('CONTACT', view.w / 2, noticeY);
+      } else if (state.car.recoverFlash > 0) {
         ctx.fillStyle = '#7ec8f2';
         ctx.fillText('BACK ON TRACK', view.w / 2, noticeY);
       } else if (state.car.offRoad) {

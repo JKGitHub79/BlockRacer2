@@ -23,7 +23,8 @@ var sandbox = { Math: Math, console: console };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 
-['config.js', 'src/track.js', 'src/car.js', 'src/ai.js'].forEach(function (file) {
+['config.js', 'src/track.js', 'src/car.js', 'src/ai.js',
+ 'src/collision.js'].forEach(function (file) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), sandbox, { filename: file });
 });
 
@@ -111,8 +112,12 @@ console.log('  max lateral    ' + hands.maxLateral.toFixed(1) + ' px  (road edge
 
 // Measured on time as well as distance: the off-road recovery in car.js caps
 // how far the car can stray, so peak lateral alone understates the excursion.
+// Measured as an ABSOLUTE margin past the edge, not a multiple of the road
+// width: how far a hands-off car drifts is set by the steering physics, so
+// scaling the bar with the road made a wider road look like a regression when
+// nothing about the handling had changed.
 check('hands-off leaves the road decisively',
-      hands.maxLateral > hands.halfWidth * 1.5 && hands.offRoadTime > 2.0,
+      hands.maxLateral > hands.halfWidth + base.carWidth * 2 && hands.offRoadTime > 2.0,
       (hands.maxLateral - hands.halfWidth).toFixed(0) + ' px past the edge, '
         + hands.offRoadTime.toFixed(1) + 's on the grass');
 check('hands-off fails to qualify', hands.lapTime === null || hands.lapTime > qual,
@@ -551,6 +556,562 @@ console.log('\n=== 11. The chase ===\n');
   check('the player works through the whole field',
         passed === field.length, passed + ' of ' + field.length + ' passed');
 })();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 12. Lanes ===\n');
+
+console.log('  lanes   road    lane    grid/row   AI on lane centres   widest car');
+[3, 4, 5, 6].forEach(function (n) {
+  var cfg = makeConfig({ lanes: n });
+  var track = BR.track.build(cfg);
+  var field = BR.ai.buildField(cfg, track);
+
+  // Lane centres must be evenly spaced and sit inside the road.
+  var centres = [];
+  for (var i = 0; i < n; i++) centres.push(BR.laneCentre(cfg, i));
+  var evenlySpaced = true;
+  for (var k = 1; k < centres.length; k++) {
+    if (Math.abs((centres[k] - centres[k - 1]) - cfg.laneWidth) > 1e-9) evenlySpaced = false;
+  }
+  var widest = Math.max.apply(null, centres.map(Math.abs));
+  var insideRoad = widest + cfg.carWidth / 2 <= cfg.roadWidth / 2 + 1e-9;
+
+  // Every car in the first row should be sitting on a lane centre.
+  var firstRow = field.slice(0, cfg.gridPerRow);
+  var onCentres = firstRow.every(function (c) {
+    return centres.some(function (ct) { return Math.abs(c.loc.lateral - ct) < 1.5; });
+  });
+
+  console.log('  ' + String(n).padEnd(8) + (cfg.roadWidth + 'px').padEnd(8) +
+              (cfg.laneWidth + 'px').padEnd(8) + String(cfg.gridPerRow).padEnd(11) +
+              (onCentres ? 'yes' : 'NO').padEnd(21) + widest.toFixed(0) + 'px');
+
+  check(n + ' lanes: road width follows the lane count',
+        cfg.roadWidth === n * cfg.laneWidth, cfg.roadWidth + 'px');
+  check(n + ' lanes: lane centres are evenly spaced and inside the road',
+        evenlySpaced && insideRoad);
+  check(n + ' lanes: one grid column per lane', cfg.gridPerRow === n);
+  check(n + ' lanes: the front row grids on the lane centres', onCentres);
+  check(n + ' lanes: the whole field is placed', field.length === cfg.aiCars);
+});
+
+// The track doubles back, so a road wide enough would overlap itself.
+(function () {
+  var cfg = makeConfig({ lanes: BR.CONFIG_LIMITS.lanes.max });
+  var track = BR.track.build(cfg);
+  var pts = track.points;
+  var closest = Infinity;
+  for (var i = 0; i < pts.length; i++) {
+    for (var j = i + 1; j < pts.length; j++) {
+      if (pts[j].s - pts[i].s < 600) continue;
+      var d = Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y);
+      if (d < closest) closest = d;
+    }
+  }
+  console.log('');
+  check('at the maximum lane count the road still does not overlap itself',
+        closest > cfg.roadWidth,
+        closest.toFixed(0) + 'px apart, road is ' + cfg.roadWidth + 'px wide');
+})();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 13. Player / AI collisions ===\n');
+
+/* A controlled straight with cars planted at known speeds, so impacts can be
+ * measured rather than eyeballed. */
+function collisionRig(targets) {
+  var cfg = makeConfig();
+  cfg.track = Object.assign({}, cfg.track, {
+    segments: [{ type: 'straight', seconds: 120 }]
+  });
+  var track = BR.track.build(cfg);
+
+  var field = targets.map(function (t) {
+    var aiCfg = {};
+    Object.keys(cfg).forEach(function (k) { aiCfg[k] = cfg[k]; });
+    aiCfg.fullSpeed = t.speed;
+    aiCfg.accelerationTime = 0.001;        // already up to speed
+    var car = new BR.Car(aiCfg, track);
+    var p = BR.track.at(track, t.s);
+    var lane = t.lane === undefined ? 0 : t.lane;
+    car.x = p.x - Math.sin(p.h) * lane;
+    car.y = p.y + Math.cos(p.h) * lane;
+    car.heading = p.h;
+    car.speed = t.speed;
+    car.hint = Math.round(t.s / BR.track.SAMPLE_SPACING);
+    car.loc = BR.track.locate(track, car.x, car.y, car.hint);
+    car.lane = lane;
+    car.searchBehind = 8;
+    car.searchAhead = 40;
+    return car;
+  });
+
+  var player = new BR.Car(cfg, track);
+  BR.collision.reset(player, field);
+  return { cfg: cfg, track: track, field: field, player: player };
+}
+
+/* Drives the player forward for `seconds`, optionally steering, and records
+ * everything needed to judge the collision response. */
+function runRig(rig, seconds, steer, afterStep) {
+  var p = rig.player, log = {
+    impacts: [], maxStep: 0, passedThrough: false, recoveries: 0,
+    minSpeed: Infinity, maxSpeed: 0, samples: []
+  };
+  var t = 0;
+  while (t < seconds) {
+    var before = p.speed;
+    var px = p.x, py = p.y;
+
+    var recoverBefore = p.recoverFlash;
+    var contactBefore = rig.field.map(function (ai) { return !!ai.playerContact; });
+    rig.field.forEach(function (ai) { ai.update(STEP, 0); });
+    p.update(STEP, steer ? steer(t, p, rig) : 0);
+    var hits = BR.collision.resolve(p, rig.field, rig.cfg);
+    t += STEP;
+
+    if (hits > 0) {
+      // Record WHICH car each impact was with. A car hit, escaped and then
+      // caught again is a legitimate second impact, not a double count, so
+      // the tests need to distinguish cars from events.
+      var which = -1;
+      rig.field.forEach(function (ai, idx) {
+        if (ai.playerContact && !contactBefore[idx]) which = idx;
+      });
+      log.impacts.push({ t: t, from: before, to: p.speed, car: which });
+    }
+    // The off-road recovery deliberately lifts the car back onto the racing
+    // line, which is a ~200px jump and nothing to do with collisions. Only
+    // count ordinary steps, or every run that touches grass looks unstable.
+    var recovered = p.recoverFlash > recoverBefore;
+    if (recovered) log.recoveries++;
+    else log.maxStep = Math.max(log.maxStep, Math.hypot(p.x - px, p.y - py));
+    log.minSpeed = Math.min(log.minSpeed, p.speed);
+    log.maxSpeed = Math.max(log.maxSpeed, p.speed);
+    // Pass-through: the player ending up in front of a car it is touching.
+    rig.field.forEach(function (ai) {
+      if (ai.playerContact && p.loc.s > ai.loc.s + rig.cfg.carLength) log.passedThrough = true;
+    });
+    if (afterStep) afterStep(rig);
+    if (Math.round(t / STEP) % 60 === 0) log.samples.push(Math.round(p.speed));
+  }
+  return log;
+}
+
+// --- One impact at top speed ------------------------------------------------
+(function () {
+  var rig = collisionRig([{ s: 900, speed: 240 }]);
+  var log = runRig(rig, 8);
+  var first = log.impacts[0];
+
+  console.log('  hitting a 240 px/s car at full speed');
+  console.log('    impacts            ' + log.impacts.length);
+  console.log('    speed before/after ' + (first ? first.from.toFixed(0) + ' -> ' + first.to.toFixed(0) : 'none'));
+  console.log('    biggest step       ' + log.maxStep.toFixed(2) + 'px  (a clean step is '
+            + (rig.cfg.fullSpeed * STEP).toFixed(2) + 'px)\n');
+
+  check('the player is slowed by the impact', !!first && first.from > 400);
+  check('speed drops to about the car hit',
+        !!first && Math.abs(first.to - 240) < 25, first ? first.to.toFixed(0) + ' px/s vs 240' : 'no impact');
+  check('one contact counts once, not every frame',
+        log.impacts.length === 1, log.impacts.length + ' impacts recorded');
+  check('the player does not pass through the car', !log.passedThrough);
+  check('no teleporting', log.maxStep < rig.cfg.fullSpeed * STEP + 7,
+        log.maxStep.toFixed(2) + 'px in one step');
+  check('the player is not left stuck', rig.player.speed > 200,
+        rig.player.speed.toFixed(0) + ' px/s at the end');
+})();
+
+// --- Consecutive collisions with acceleration in between --------------------
+//
+// Once the player is held behind a slower car they cannot reach the next one
+// without pulling out, which is the intended behaviour — so this steers for
+// the lane of the next car it has not hit yet, hits it, pulls out, winds back
+// up to full speed, and hits the next.
+(function () {
+  var cfg = makeConfig();
+  var targets = [
+    { s: 900,  speed: 300, lane: BR.laneCentre(cfg, 1) },
+    { s: 2600, speed: 240, lane: BR.laneCentre(cfg, 3) },
+    { s: 4400, speed: 180, lane: BR.laneCentre(cfg, 0) }
+  ];
+  var rig = collisionRig(targets);
+  rig.field.forEach(function (c) { c.hitOnce = false; });
+
+  var recovered = [];
+  var log = runRig(rig, 45, function (t, p) {
+    // Aim for the lane of the next car still to be hit.
+    var next = null;
+    for (var i = 0; i < rig.field.length; i++) {
+      if (!rig.field[i].hitOnce) { next = rig.field[i]; break; }
+    }
+    if (!next) return 0;
+    var want = next.lane;
+    return p.loc.lateral < want - 5 ? 1 : (p.loc.lateral > want + 5 ? -1 : 0);
+  }, function (rig2) {
+    // Book-keeping each step: mark cars hit, and note the best speed reached
+    // between impacts.
+    rig2.field.forEach(function (c) { if (c.playerContact) c.hitOnce = true; });
+  });
+
+  // First impact with each distinct car, in the order they were met.
+  var firsts = [];
+  log.impacts.forEach(function (i) {
+    if (!firsts.some(function (f) { return f.car === i.car; })) firsts.push(i);
+  });
+  var drops = firsts.map(function (i) { return Math.round(i.to); });
+  var befores = firsts.map(function (i) { return Math.round(i.from); });
+  var speeds = targets.map(function (t) { return t.speed; });
+
+  console.log('  three cars at 300 / 240 / 180 px/s, each in its own lane');
+  console.log('    impacts            ' + log.impacts.map(function (i) {
+    return 'car' + i.car + ' ' + i.from.toFixed(0) + '->' + i.to.toFixed(0);
+  }).join(',  '));
+  console.log('    biggest step       ' + log.maxStep.toFixed(2) + 'px\n');
+
+  check('every car in the line is hit', firsts.length === 3,
+        firsts.length + ' distinct cars hit');
+  check('each impact drops to roughly the speed of the car hit',
+        firsts.every(function (f, k) {
+          return Math.abs(f.to - speeds[f.car]) < 30;
+        }), drops.join(', ') + ' vs ' + speeds.join(', '));
+  check('the player accelerates back up between different cars',
+        befores.length === 3 && befores[1] > drops[0] + 80 && befores[2] > drops[1] + 80,
+        'dropped to ' + drops.join('/') + ', arrived at ' + befores.join('/') + ' px/s');
+  // Catching a slower car again after being pushed clear is correct, not a
+  // double count — the contact genuinely ended and began again.
+  check('re-catching a car already hit counts as a fresh impact',
+        log.impacts.length >= firsts.length,
+        log.impacts.length + ' impacts across ' + firsts.length + ' cars');
+  check('repeated collisions stay stable',
+        log.maxStep < cfg.fullSpeed * STEP + 7 && !log.passedThrough,
+        log.maxStep.toFixed(2) + 'px biggest step');
+})();
+
+// --- Colliding while still accelerating -------------------------------------
+// Two cars close together: the player is knocked down by the first and meets
+// the second before it has wound back up to full speed.
+(function () {
+  var cfg = makeConfig();
+  var rig = collisionRig([
+    { s: 900,  speed: 200, lane: BR.laneCentre(cfg, 1) },
+    { s: 1400, speed: 120, lane: BR.laneCentre(cfg, 3) }
+  ]);
+  rig.field.forEach(function (c) { c.hitOnce = false; });
+  var log = runRig(rig, 25, function (t, p) {
+    var next = null;
+    for (var i = 0; i < rig.field.length; i++) {
+      if (!rig.field[i].hitOnce) { next = rig.field[i]; break; }
+    }
+    if (!next) return 0;
+    return p.loc.lateral < next.lane - 5 ? 1 : (p.loc.lateral > next.lane + 5 ? -1 : 0);
+  }, function (r) {
+    r.field.forEach(function (c) { if (c.playerContact) c.hitOnce = true; });
+  });
+
+  var second = log.impacts[1];
+  console.log('  a second car met before the player is back up to speed');
+  console.log('    impacts            ' + log.impacts.map(function (i) {
+    return i.from.toFixed(0) + '->' + i.to.toFixed(0);
+  }).join(',  ') + '\n');
+
+  check('both cars register an impact', log.impacts.length === 2,
+        log.impacts.length + ' impacts');
+  check('the second impact lands mid-acceleration',
+        !!second && second.from < cfg.fullSpeed - 20,
+        second ? 'arrived at ' + second.from.toFixed(0) + ' px/s' : 'n/a');
+  check('and still drops to roughly that car speed',
+        !!second && Math.abs(second.to - 120) < 30,
+        second ? second.to.toFixed(0) + ' px/s vs 120' : 'n/a');
+})();
+
+// --- Cars running side by side must not collide -----------------------------
+(function () {
+  var cfg = makeConfig();
+  var lane = BR.laneCentre(cfg, 3) * 0.8;
+  var rig = collisionRig([{ s: 400, speed: 420, lane: lane }]);
+  // Player holds the centre lane; the other car runs alongside at the same pace.
+  var log = runRig(rig, 10, function (t, p) {
+    return p.loc.lateral < -4 ? 1 : (p.loc.lateral > 4 ? -1 : 0);
+  });
+  console.log('  a car running alongside in another lane');
+  console.log('    impacts            ' + log.impacts.length + '  (lane gap '
+            + Math.abs(lane).toFixed(0) + 'px, cars are ' + cfg.carWidth + 'px wide)\n');
+  check('cars in neighbouring lanes do not collide', log.impacts.length === 0,
+        log.impacts.length + ' false impacts');
+})();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 14. Turning slide ===\n');
+
+/* Runs an identical input sequence on a straight and reports where the car
+ * ends up across the road, plus the biggest single step it took. Comparing a
+ * run against the same run with slideDistance 0 isolates the slide exactly. */
+function slideRun(opts) {
+  var cfg = makeConfig({ slideDistance: opts.distance });
+  cfg.track = Object.assign({}, cfg.track, { segments: [{ type: 'straight', seconds: 120 }] });
+  var track = BR.track.build(cfg);
+  var car = new BR.Car(cfg, track);
+
+  // Wind up to the requested fraction of top speed before turning.
+  var target = cfg.fullSpeed * (opts.speedFraction === undefined ? 1 : opts.speedFraction);
+  var t = 0;
+  while (car.speed < target - 0.5 && t < 10) { car.update(STEP, 0); t += STEP; }
+  // Hold the speed by capping it, so a part-throttle case stays part-throttle.
+  if (opts.speedFraction !== undefined && opts.speedFraction < 1) car.speedLimit = target;
+
+  var maxStep = 0, held = 0, offRoad = false;
+  function step(input) {
+    var px = car.x, py = car.y;
+    car.update(STEP, input);
+    maxStep = Math.max(maxStep, Math.hypot(car.x - px, car.y - py));
+    if (car.offRoad) offRoad = true;
+  }
+
+  while (held < opts.hold) { step(-1); held += STEP; }      // turn
+  var atRelease = car.loc.lateral;
+  var after = 0;
+  while (after < 3.0) { step(0); after += STEP; }            // let go
+
+  return {
+    cfg: cfg, finalLateral: car.loc.lateral, atRelease: atRelease,
+    maxStep: maxStep, offRoad: offRoad, halfWidth: track.halfWidth
+  };
+}
+
+function slideCarry(distance, hold, speedFraction) {
+  var withSlide = slideRun({ distance: distance, hold: hold, speedFraction: speedFraction });
+  var without = slideRun({ distance: 0, hold: hold, speedFraction: speedFraction });
+  return {
+    carry: Math.abs(withSlide.finalLateral) - Math.abs(without.finalLateral),
+    withSlide: withSlide, without: without
+  };
+}
+
+console.log('  setting   measured carry   biggest step   stayed on road');
+// Settings kept to values a 0.12s flick can carry without reaching the grass;
+// beyond that the measurement is about the grass, not the slide.
+[0, 20, 40, 60, 80].forEach(function (d) {
+  var r = slideCarry(d, 0.12);
+  console.log('  ' + (d + 'px').padEnd(10) + (r.carry.toFixed(0) + 'px').padEnd(17) +
+              (r.withSlide.maxStep.toFixed(2) + 'px').padEnd(15) +
+              (r.withSlide.offRoad ? 'no' : 'yes'));
+
+  if (d === 0) {
+    check('slide off means no extra travel at all', Math.abs(r.carry) < 0.5,
+          r.carry.toFixed(2) + 'px');
+  } else {
+    // Within 15%: the heading is still unwinding while the slide bleeds off,
+    // so the two overlap slightly. Close enough that the number means what it
+    // says on the slider.
+    check(d + 'px: the run stayed on tarmac (else the grass distorts it)',
+          !r.withSlide.offRoad && !r.without.offRoad);
+    check(d + 'px setting carries about that far',
+          Math.abs(r.carry - d) < d * 0.15,
+          'measured ' + r.carry.toFixed(0) + 'px');
+  }
+  check(d + 'px: movement stays smooth',
+        r.withSlide.maxStep < r.withSlide.cfg.fullSpeed * STEP * 1.6,
+        r.withSlide.maxStep.toFixed(2) + 'px in one step');
+});
+
+// --- Below top speed there must be no slide at all --------------------------
+console.log('');
+[0.5, 0.8, 0.95].forEach(function (frac) {
+  var r = slideCarry(50, 0.12, frac);
+  check('at ' + Math.round(frac * 100) + '% of top speed the car does not slide',
+        Math.abs(r.carry) < 1.0, r.carry.toFixed(2) + 'px of carry');
+});
+(function () {
+  var r = slideCarry(50, 0.12, 1.0);
+  check('at top speed it does slide', r.carry > 20, r.carry.toFixed(0) + 'px of carry');
+})();
+
+// --- The slide must not fling a car that is already off the road ------------
+// Measured as what the slide ADDS: driving hard off the side takes the car a
+// long way out by itself, which is normal. The guard is that the slide stops
+// contributing once the car is past the overrun limit.
+(function () {
+  function peakOut(distance) {
+    var cfg = makeConfig({ slideDistance: distance });
+    cfg.track = Object.assign({}, cfg.track, { segments: [{ type: 'straight', seconds: 120 }] });
+    var track = BR.track.build(cfg);
+    var car = new BR.Car(cfg, track);
+    var t = 0;
+    while (car.speed < cfg.fullSpeed - 0.5 && t < 10) { car.update(STEP, 0); t += STEP; }
+    var held = 0, peak = 0;
+    while (held < 1.2) { car.update(STEP, -1); held += STEP; peak = Math.max(peak, Math.abs(car.loc.lateral)); }
+    var after = 0;
+    while (after < 2.0) { car.update(STEP, 0); after += STEP; peak = Math.max(peak, Math.abs(car.loc.lateral)); }
+    return { peak: peak, limit: track.halfWidth + cfg.carWidth * cfg.slideOverrunLimitInCars };
+  }
+  var big = peakOut(250);
+  var none = peakOut(0);
+  var added = big.peak - none.peak;
+  console.log('');
+  console.log('  driving hard off the side, 250px slide vs none:');
+  console.log('    peak out           ' + big.peak.toFixed(0) + 'px vs ' + none.peak.toFixed(0) +
+              'px   (overrun limit ' + big.limit.toFixed(0) + 'px)\n');
+  check('a big slide setting cannot fling a car that is already off the road',
+        added < 60, 'added only ' + added.toFixed(0) + 'px past the limit');
+})();
+
+// --- A collision while the car is sliding ------------------------------------
+//
+// Every collision test above already runs with the slide enabled at its
+// default, so collisions and the slide coexist. What needs checking on its own
+// is the handover: a car that arrives mid-slide must still register the
+// contact, and the drift must stop dead rather than carrying the player
+// sideways through the car it just hit.
+//
+// Done directly rather than by flicking the car across a lane and hoping the
+// timing lines up: a short flick at full lock carries 173px on a road whose
+// edge is 160px away, so the car left the road and the recovery put it back on
+// the centreline before it ever reached the traffic.
+(function () {
+  var cfg = makeConfig({ slideDistance: 80 });
+  var rig = collisionRig([{ s: 150, speed: 180, lane: 0 }]);
+  rig.cfg.slideDistance = 80;
+
+  var p = rig.player;
+  // Bring the player up to speed just behind the other car.
+  var t = 0;
+  while (p.speed < rig.cfg.fullSpeed - 0.5 && t < 6) {
+    rig.field[0].update(STEP, 0);
+    p.update(STEP, 0);
+    BR.collision.resolve(p, rig.field, rig.cfg);
+    t += STEP;
+  }
+
+  // Force a live slide, then step until contact.
+  // Modest enough that the car does not drift out of the other car's lane
+  // before it gets there, but live for long enough to still be sliding on
+  // contact.
+  p.slideVel = 80;
+  p.slideDecel = (80 * 80) / (2 * rig.cfg.slideDistance);
+  var slidingAtImpact = false, impacts = 0, maxStep = 0, guard = 0;
+  while (impacts === 0 && guard < 2400) {
+    var px = p.x, py = p.y;
+    var wasSliding = Math.abs(p.slideVel) > 1;
+    rig.field[0].update(STEP, 0);
+    p.update(STEP, 0);
+    var hits = BR.collision.resolve(p, rig.field, rig.cfg);
+    if (hits > 0) { impacts += hits; slidingAtImpact = wasSliding; }
+    maxStep = Math.max(maxStep, Math.hypot(p.x - px, p.y - py));
+    guard++;
+  }
+
+  console.log('');
+  console.log('  a collision arriving while the car is sliding');
+  console.log('    impacts            ' + impacts +
+              '   sliding on contact: ' + (slidingAtImpact ? 'yes' : 'no'));
+  console.log('    slide after impact ' + p.slideVel.toFixed(2) + ' px/s' +
+              '   biggest step ' + maxStep.toFixed(2) + 'px\n');
+
+  check('a car arriving mid-slide still registers the collision', impacts === 1,
+        impacts + ' impacts');
+  check('the contact happened while the slide was live', slidingAtImpact);
+  check('the collision kills the slide', Math.abs(p.slideVel) < 1e-9,
+        p.slideVel.toFixed(3) + ' px/s left');
+  check('sliding into a car is not unstable',
+        maxStep < rig.cfg.fullSpeed * STEP + 7, maxStep.toFixed(2) + 'px biggest step');
+})();
+
+// ---------------------------------------------------------------------------
+console.log('\n=== 15. All three together: traffic, lanes and slide ===\n');
+
+/* A lap driven for real against a live field, with collisions and the slide
+ * both active. Sections 1-9 drive an empty track, so this is the only place
+ * the three new systems meet. */
+function trafficLap(opts) {
+  var cfg = makeConfig(opts.cfg || {});
+  var track = BR.track.build(cfg);
+  var field = BR.ai.buildField(cfg, track);
+  var player = new BR.Car(cfg, track);
+  BR.collision.reset(player, field);
+
+  var lanes = [];
+  for (var i = 0; i < cfg.lanes; i++) lanes.push(BR.laneCentre(cfg, i) * 0.8);
+  var lane = 0, t = 0, contacts = 0, crawling = 0, frozen = 0;
+
+  while (t < 200) {
+    BR.ai.updateField(field, track, STEP);
+
+    // Move over when something slow is sitting in this lane.
+    if (opts.avoid && Math.round(t / STEP) % 12 === 0) {
+      var blocked = field.some(function (c) {
+        var ds = c.loc.s - player.loc.s;
+        return !c.finished && ds > 0 && ds < 220 &&
+               Math.abs(c.loc.lateral - player.loc.lateral) < 34;
+      });
+      if (blocked) {
+        var best = null, bestD = Infinity;
+        lanes.forEach(function (L) {
+          var clear = !field.some(function (c) {
+            var ds = c.loc.s - player.loc.s;
+            return !c.finished && ds > -90 && ds < 300 && Math.abs(c.loc.lateral - L) < 40;
+          });
+          var d = Math.abs(L - player.loc.lateral);
+          if (clear && d < bestD && d > 10) { best = L; bestD = d; }
+        });
+        if (best !== null) lane = best;
+      }
+    }
+
+    var ahead = BR.track.at(track, Math.min(track.length, player.loc.s + Math.max(60, player.speed * 0.35)));
+    var desired = ahead.h - Math.max(-0.7, Math.min(0.7, (player.loc.lateral - lane) * 0.010));
+    var err = BR.wrapAngle(desired - player.heading);
+    player.update(STEP, err > 0.02 ? 1 : (err < -0.02 ? -1 : 0));
+    contacts += BR.collision.resolve(player, field, cfg);
+    t += STEP;
+
+    if (t > 3 && player.speed < 60) crawling += STEP;
+    if (t > 3 && player.speed < 1) frozen += STEP;
+    if (player.hasFinishedLap()) {
+      return { t: t, contacts: contacts, crawling: crawling, frozen: frozen };
+    }
+  }
+  return { t: null, contacts: contacts, crawling: crawling, frozen: frozen };
+}
+
+var clean = trafficLap({ cfg: { aiCars: 5 }, avoid: true });
+console.log('  cars   lane changes   lap        contacts   crawling   never finished');
+[[12, true], [12, false], [40, true], [100, true]].forEach(function (e) {
+  var r = trafficLap({ cfg: { aiCars: e[0] }, avoid: e[1] });
+  console.log('  ' + String(e[0]).padEnd(7) + (e[1] ? 'yes' : 'no').padEnd(15) +
+              (r.t === null ? ' DNF ' : r.t.toFixed(2) + 's').padEnd(11) +
+              String(r.contacts).padEnd(11) + (r.crawling.toFixed(1) + 's').padEnd(11) +
+              (r.t === null ? 'YES' : 'no'));
+
+  check(e[0] + ' cars' + (e[1] ? '' : ', no lane changes') + ': the lap always finishes',
+        r.t !== null, r.t === null ? 'never finished' : r.t.toFixed(2) + 's');
+  // The bug this guards: AI cars used to park ON the finish line at zero
+  // speed, so the player collided with one, was capped to zero and sat 57px
+  // short of the flag for good.
+  check(e[0] + ' cars' + (e[1] ? '' : ', no lane changes') + ': never frozen in place',
+        r.frozen < 0.1, r.frozen.toFixed(1) + 's at a standstill');
+  check(e[0] + ' cars' + (e[1] ? '' : ', no lane changes') + ': never left crawling',
+        r.crawling < 2.0, r.crawling.toFixed(1) + 's under 60 px/s');
+});
+
+console.log('');
+check('traffic costs lap time, so collisions matter',
+      trafficLap({ cfg: { aiCars: 40 }, avoid: true }).t > clean.t + 1.5,
+      'a light field laps in ' + clean.t.toFixed(2) + 's');
+
+// Lanes and the slide must not break the pairing either.
+[3, 6].forEach(function (n) {
+  var r = trafficLap({ cfg: { lanes: n, aiCars: 20 }, avoid: true });
+  check(n + ' lanes with traffic and slide: the lap still finishes',
+        r.t !== null && r.frozen < 0.1,
+        r.t === null ? 'never finished' : r.t.toFixed(2) + 's');
+});
+[0, 150].forEach(function (d) {
+  var r = trafficLap({ cfg: { slideDistance: d, aiCars: 20 }, avoid: true });
+  check('slide ' + d + 'px with traffic: the lap still finishes',
+        r.t !== null && r.frozen < 0.1,
+        r.t === null ? 'never finished' : r.t.toFixed(2) + 's');
+});
 
 console.log('');
 if (failures.length) {

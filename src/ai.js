@@ -38,14 +38,16 @@
     // acceleration from fullSpeed / accelerationTime, so overriding the time
     // here is all it takes.
     out.accelerationTime = cfg.aiAccelerationTime;
+    // The slide is a player mechanic; AI cars hold their line as before.
+    out.slideDistance = 0;
     return out;
   }
 
-  /* Evenly spaced lanes across the road, inset so no car overhangs the edge. */
-  function laneOffset(col, perRow, halfWidth, carWidth) {
-    if (perRow <= 1) return 0;
-    var usable = (halfWidth - carWidth * 0.6) * 2;
-    return -usable / 2 + (usable * col) / (perRow - 1);
+  /* Cars grid on actual lane centres, so the field lines up with the painted
+   * lanes whatever the lane count. BR.laneCentre is the single definition of
+   * where a lane sits. */
+  function laneOffset(cfg, col) {
+    return BR.laneCentre(cfg, col);
   }
 
   /* The grid has to use the full width of the road to fit five cars abreast,
@@ -88,7 +90,7 @@
     // The lanes cars actually race on, shared so a car can pick another.
     var raceLanes = [];
     for (var c = 0; c < perRow; c++) {
-      raceLanes.push(laneOffset(c, perRow, track.halfWidth, cfg.carWidth) * RACE_LANE_FRACTION);
+      raceLanes.push(laneOffset(cfg, c) * RACE_LANE_FRACTION);
     }
 
     for (var i = 0; i < cfg.aiCars; i++) {
@@ -97,7 +99,7 @@
       var s = cfg.gridStartGap + row * cfg.gridRowSpacing;
       if (s > track.length - 200) break;          // never grid past the finish
 
-      var lane = laneOffset(col, perRow, track.halfWidth, cfg.carWidth);
+      var lane = laneOffset(cfg, col);
       var factor = cfg.aiSpeedMin + rand() * (cfg.aiSpeedMax - cfg.aiSpeedMin);
 
       var car = new BR.Car(copyConfig(cfg, cfg.fullSpeed * factor), track);
@@ -233,10 +235,19 @@
     considerOvertaking(cars, order, dt);
     for (var i = 0; i < cars.length; i++) {
       var car = cars[i];
-      if (car.finished) continue;
-      if (car.loc.s >= track.length - 1) {        // park it on the line
+
+      if (car.finished) {
+        // Coast on straight past the line, keeping speed. Parking finishers
+        // ON the line turned the finish into a wall of stationary cars: the
+        // player collided with one, was capped to its speed of zero, and sat
+        // there 57px short of the flag for good.
+        car.x += Math.cos(car.heading) * car.speed * dt;
+        car.y += Math.sin(car.heading) * car.speed * dt;
+        continue;
+      }
+
+      if (car.loc.s >= track.length - 1) {
         car.finished = true;
-        car.speed = 0;
         continue;
       }
       car.update(dt, drive(car, track));

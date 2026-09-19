@@ -205,6 +205,80 @@ A clean lap is about **39.7s** (the racing line cuts inside the centreline on
 twelve corners, so it beats the 40s the centreline would take), leaving ~11%
 slack — the same proportional margin every earlier version had.
 
+## Lanes
+
+**Lanes** (3–6, default 5) sets how many lanes the road has. It widens the
+road rather than squeezing the existing lanes: a lane is `laneWidthInCars` wide
+(2 car widths, 64px), so the road is `lanes × 64px`. Everything lane-dependent
+derives from it — road width, the dashed dividers, the starting grid (one car
+per lane) and the lanes the AI race on — through `BR.deriveConfig` and
+`BR.laneCentre`, which is the single definition of where a lane sits.
+
+| Lanes | Road | Grid per row |
+| --- | --- | --- |
+| 3 | 192px | 3 |
+| **5** | **320px** | **5** |
+| 6 | 384px | 6 |
+
+The bounds are not arbitrary. **6 is the ceiling** because the track doubles
+back on itself: the closest approach between distant parts of the centreline is
+490px, so a wider road would overlap itself — the test suite checks this at the
+maximum. **3 is the floor** because a 2-lane road is only 128px wide, narrower
+than anything this track has been shown to be drivable on, and the reference
+driver clips the edge on the 90° corners.
+
+Widening the road made the game more forgiving, so the qualifying time was
+tightened to compensate — see *Going off the road*.
+
+## Collisions
+
+The player's car no longer passes through AI cars. Contact is tested with a
+separating-axis test on the two oriented boxes: cars are 56×32 racing in lanes
+64px apart, so a circle test would both miss a nose-to-tail shunt and fire
+constantly between cars running safely side by side.
+
+The response has two halves:
+
+* **A one-off speed drop when a contact begins.** The player is knocked back to
+  roughly the speed of the car hit. A flag on that AI car marks the contact as
+  counted, so a sustained shunt cannot re-trigger every frame; it clears once
+  the cars separate, so hitting the same car again later counts again.
+* **A positional push and a speed cap while the contact lasts**, so the player
+  cannot drive through the car in front. Without the cap the player would
+  accelerate into it, penetrate, get shoved back and jitter; with it they sit at
+  the other car's pace until they steer clear.
+
+AI cars are not moved or slowed by the player, and AI-to-AI behaviour is
+unchanged. Measured: hitting cars at 300 / 240 / 180 px/s in turn drops the
+player to 300 / 240 / 180 and it accelerates back to 420 in between.
+
+## Turning slide
+
+**Slide Distance** (0–250px, default 50) is how far the car keeps drifting
+sideways after you stop turning at top speed. 0 disables it.
+
+It only applies to the player, and only at or above `slideMinSpeedFraction`
+(98%) of Full Speed — below that the car changes direction as crisply as it
+ever did, so the slide is purely a high-speed penalty.
+
+The mechanism is momentum handover. While a turn is held at top speed the car
+is *charging*: the slide adds nothing, it just remembers how fast sideways the
+car is going. The moment the steering eases, that sideways speed is handed to
+the slide, which bleeds it off under a constant deceleration sized from the
+speed at handover — so the carry is the configured distance whatever speed you
+were sliding at. Measured against the same run with the slide off:
+
+| Setting | Measured carry |
+| --- | --- |
+| 20px | 19px |
+| 40px | 39px |
+| 60px | 59px |
+| 80px | 79px |
+
+A collision kills the slide, and the slide will not push the car more than
+`slideOverrunLimitInCars` (one car width) beyond the road edge, so it can never
+fling a car that is already off into the middle of a field.
+
 ## AI cars
 
 **AI Cars** puts 5–100 opponents on the starting grid, four abreast up the road
@@ -263,11 +337,24 @@ Measured behaviour, from `tools/simulate.js`:
 width. A single worst-case minimum is the wrong measure here — any lane change
 briefly brings two cars within about 30px, which is racing, not a pile-up.
 
-**They do not collide**, with each other or with you. That is the significant
-limitation: you can drive through the field rather than having to find a way
-past it, and it is why the qualifying time is unaffected by the car count.
-Adding collisions would change the game substantially and would need the
-qualifying time re-tuned around it.
+AI cars still do not collide **with each other** — only with you. A faster AI
+car catching a slower one gives way through car following and lane changes
+rather than through contact.
+
+**Traffic now costs lap time, and the car count is effectively a difficulty
+dial.** Measured over a full lap against a 42.00s target:
+
+| Field | Lap | Contacts |
+| --- | --- | --- |
+| Light, avoiding traffic | 39.85s | 0 |
+| 12 cars, avoiding traffic | 39.61s | 2 |
+| 12 cars, ploughing straight on | 43.59s | 22 |
+| 40 cars, avoiding traffic | 42.94s | 21 |
+| 100 cars, avoiding traffic | 48.01s | 27 |
+
+So qualifying is comfortable with a small field, marginal around 40 cars and
+out of reach at 100 — a hundred-car grid is a traffic exercise rather than a
+time trial. Worth knowing before blaming the qualifying time.
 
 Frame time with 100 cars is 0.8ms on a phone viewport against a 16.7ms budget.
 
@@ -304,6 +391,8 @@ The four headline settings are on the title screen **and** in `config.js`:
 | Straighten Speed | 170°/s | 30–400 |
 | Grass Slowdown | 50% | 0–90% |
 | AI Cars | 12 | 5–100 |
+| Lanes | 5 | 3–6 |
+| Slide Distance | 50px | 0–250px |
 | No. Laps | 1 | 1–20 |
 | Full Speed | 420 px/s | 120–1200 |
 
@@ -365,7 +454,9 @@ title-screen setting. Section 8 pins the steering-feel numbers in the table
 above so responsiveness cannot regress.
 
 `tools/browser-test.js` loads the page in Chromium and covers the title-screen
-sliders, range labels and reset button; a full lap driven with real key events;
+sliders (all ten), range labels and reset button; lane counts reaching the road,
+the grid and the AI; a collision while driving into the pack; the slide at and
+below top speed; a full lap driven with real key events;
 layout and world scale across six resolutions from a 320px phone to an
 ultrawide; the optic flow on a straight; touch steering on a phone viewport
 (including that it never scrolls or zooms the page); and that a lap on a phone

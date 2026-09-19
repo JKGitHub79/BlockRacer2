@@ -74,6 +74,21 @@ BR.DEFAULT_CONFIG = {
   returnRateDeg: 170,
 
 
+  /* --- Lanes (title screen + file) ----------------------------------------- */
+
+  // How many lanes the road has. The road width, the dashed dividers, the
+  // starting grid and the lanes the AI race on are all derived from this, so
+  // nothing is hard-coded to a particular count.
+  //
+  // Range 3-6. Capped at 6 (384px) because the track doubles back on itself:
+  // the closest approach between distant parts of the centreline is 490px, so
+  // a road much wider than that would overlap itself — tools/simulate.js
+  // checks this at the maximum. The floor is 3 rather than 2 because a 2-lane
+  // road is only 128px wide, narrower than anything this track has been shown
+  // to be drivable on, and the reference driver in the harness clips the edge
+  // on the 90 degree corners.
+  lanes: 5,
+
   /* --- AI cars (title screen + file) --------------------------------------- */
 
   // How many AI cars line up on the grid. They run the same physics as the
@@ -105,16 +120,37 @@ BR.DEFAULT_CONFIG = {
   // times stay reproducible.
   aiSeed: 20260919,
 
-  // Starting grid layout. Rows run up the road ahead of the player, who starts
-  // on the line at s = 0.
-  //
-  // Four abreast, not five: cars race a narrower spread than they grid on (so
-  // the outer ones do not corner onto the grass), and at five the racing lanes
-  // end up 29px apart against a 32px car width — side-by-side cars overlap.
-  // Four leaves ~41px between racing lanes.
-  gridPerRow: 4,
+  // Starting grid. Rows run up the road ahead of the player, who starts on the
+  // line at s = 0. Cars grid one per lane, so the grid width follows the lane
+  // count; BR.deriveConfig works out gridPerRow.
   gridRowSpacing: 95,
   gridStartGap: 80,
+
+  /* --- Turning slide (title screen + file) --------------------------------- */
+
+  // Slide Distance: how far, in world pixels, the car keeps drifting sideways
+  // after you stop turning at top speed. 0 disables the slide entirely.
+  //
+  // Only the player slides, and only at (or effectively at) top speed — see
+  // slideMinSpeedFraction. Below that the car changes direction as crisply as
+  // it always did, so the slide is purely a high-speed penalty.
+  //
+  // The mechanism is lateral momentum: while you hold a turn at top speed the
+  // car banks up sideways speed, and when you release, that speed bleeds off
+  // under constant deceleration rather than stopping dead. The deceleration is
+  // sized from the sideways speed at the moment of release so the carry is
+  // this many pixels whatever speed you were sliding at, which is what makes
+  // the number mean something you can tune by feel.
+  slideDistance: 50,
+
+  // Fraction of Full Speed at which the slide starts to apply. 0.98 is
+  // "effectively at top speed" — it stops the slide flickering on and off
+  // while the car is a hair under the limit.
+  slideMinSpeedFraction: 0.98,
+
+  // The slide will not push the car further than this beyond the road edge, so
+  // it can never fling a car that is already off into the middle of a field.
+  slideOverrunLimitInCars: 1,
 
   /* --- Off-road penalty (title screen + file) ------------------------------ */
 
@@ -152,10 +188,10 @@ BR.DEFAULT_CONFIG = {
   carWidth: 32,          // world pixels
   carLength: 56,         // world pixels
 
-  // Road width in car widths. 3 lanes at 2 car widths each -> 6 * 32 = 192px.
-  // Lane dividers are drawn at +/- roadWidth/6, splitting it into three.
-  roadWidthInCars: 6,
-  lanes: 3,
+  // Width of a single lane, in car widths. The road is lanes x this x carWidth
+  // wide, so adding lanes widens the road rather than squeezing the existing
+  // ones. At 2 a lane is 64px against a 32px car.
+  laneWidthInCars: 2,
 
   // How far ahead of the car the camera looks at Full Speed, as a fraction of
   // the visible world extent ON EACH AXIS. 0 keeps the car dead centre. The
@@ -216,9 +252,19 @@ BR.DEFAULT_CONFIG = {
     name: 'Track 1',
 
     // A clean lap is ~39.7s (the racing line cuts inside the centreline on
-    // twelve corners, so it beats the 40s the centreline would take), leaving
-    // ~11% slack — the same proportional margin every earlier version had.
-    qualifyingTime: 44.0,  // seconds, PER LAP
+    // twelve corners, so it beats the 40s the centreline would take).
+    //
+    // Tightened from 44.0 when the default went to 5 lanes. A 320px road is
+    // far easier to stay on than the old 192px one: the same three-second
+    // excursion that used to cost 2.53s now costs 1.62s, so at 44.0 two
+    // mistakes no longer lost you qualifying. At 42.5 the difficulty profile
+    // matches every earlier version — one mistake eats most of the margin,
+    // two lose the run. Raise it if you widen the road further.
+    //
+    // Trimmed again to 42.0 when the slide went in: carrying a little extra
+    // lateral through the corners makes a clean lap ~0.6s quicker (39.13s),
+    // which had quietly widened the margin again.
+    qualifyingTime: 42.0,  // seconds, PER LAP
 
     segments: (function () {
       var base = [
@@ -261,15 +307,31 @@ BR.CONFIG_LIMITS = {
   steerRateDeg:     { min: 60,  max: 6000, step: 10 },
   returnRateDeg:    { min: 30,  max: 400,  step: 10 },
   grassSlowdownPct: { min: 0,   max: 90,   step: 5 },
-  aiCars:           { min: 5,   max: 100,  step: 1 }
+  aiCars:           { min: 5,   max: 100,  step: 1 },
+  lanes:            { min: 3,   max: 6,    step: 1 },
+  slideDistance:    { min: 0,   max: 250,  step: 5 }
 };
 
 /* Values worked out from the settings above rather than set directly.
  * Everything that builds a config — the title screen, the saved settings and
  * the headless harness — goes through here, so they cannot drift apart. */
 BR.deriveConfig = function (cfg) {
-  cfg.roadWidth = cfg.carWidth * cfg.roadWidthInCars;
+  // Lane count drives the road, not the other way round.
+  cfg.laneWidth = cfg.carWidth * cfg.laneWidthInCars;
+  cfg.roadWidth = cfg.laneWidth * cfg.lanes;
+
+  // One grid car per lane. Never fewer than two columns, so a two-lane road
+  // still forms a grid rather than a single file.
+  cfg.gridPerRow = Math.max(2, cfg.lanes);
+
   // Grass Slowdown is the speed you LOSE; the physics want what survives.
   cfg.offRoadSpeedFactor = 1 - (cfg.grassSlowdownPct / 100);
   return cfg;
+};
+
+/* Centre of lane `index` (0-based), as an offset from the centreline.
+ * Everything that positions a car across the road goes through this, so lane
+ * geometry is defined in exactly one place. */
+BR.laneCentre = function (cfg, index) {
+  return -cfg.roadWidth / 2 + cfg.laneWidth * (index + 0.5);
 };

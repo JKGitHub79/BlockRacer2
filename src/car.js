@@ -60,6 +60,9 @@
     this.offRoad = false;
     this.offRoadTimer = 0;
     this.recoverFlash = 0;
+    this.slideVel = 0;
+    this.slideDecel = 0;
+    this.slidePeak = 0;
     // Defined up front so anything reading it before the first update() (the
     // HUD during the countdown, for instance) sees 0 rather than undefined.
     this.steerOffset = 0;
@@ -76,6 +79,9 @@
     this.offRoad = false;
     this.offRoadTimer = 0;
     this.recoverFlash = 0;
+    this.slideVel = 0;
+    this.slideDecel = 0;
+    this.slidePeak = 0;
     this.steerOffset = 0;
   };
 
@@ -123,6 +129,67 @@
     // --- Move -------------------------------------------------------------
     this.x += Math.cos(this.heading) * this.speed * dt;
     this.y += Math.sin(this.heading) * this.speed * dt;
+
+    // --- Turning slide ----------------------------------------------------
+    // Lateral momentum that outlives the steering. While a turn is being held
+    // at top speed the car is "charging": the slide adds nothing, it just
+    // remembers how fast sideways the car is going. The moment the steering
+    // eases, that sideways speed is handed to the slide, which bleeds it off
+    // under a fixed deceleration sized to cover exactly slideDistance.
+    //
+    // The slide runs ALONGSIDE the heading rather than being netted off it.
+    // Subtracting the heading's own lateral rate instead made the configured
+    // number meaningless — the carry depended on how fast the heading happened
+    // to unwind, so 30px carried 29px but 50px carried 27px.
+    var slideExtra = 0;
+    if (cfg.slideDistance > 0) {
+      var lateral = this.speed * Math.sin(this.steerOffset);
+      var atTopSpeed = this.speed >= cfg.fullSpeed * cfg.slideMinSpeedFraction;
+      // Charging is driven by the STEERING INPUT, not by the lateral rate.
+      // Inferring it from the rate looked equivalent on a straight but broke
+      // in corners: the road heading turns under the car, so steerOffset (and
+      // with it the lateral rate) rises on its own without any input, which
+      // read as "turning harder" and wiped a slide already under way. The
+      // slide flickered on and off every other frame through every bend —
+      // precisely where it matters most.
+      if (!atTopSpeed) {
+        this.slidePeak = 0;            // a slide can only start at top speed
+      } else if (input !== 0) {
+        // Gripping: remember the hardest sideways rate reached, no slide yet.
+        if (Math.abs(lateral) >= Math.abs(this.slidePeak) ||
+            lateral * this.slidePeak < 0) {
+          this.slidePeak = lateral;
+        }
+        this.slideVel = 0;
+      } else if (this.slidePeak !== 0) {
+        // Steering released after a charged turn: hand the momentum over.
+        this.slideVel = this.slidePeak;
+        this.slideDecel = (this.slidePeak * this.slidePeak) / (2 * cfg.slideDistance);
+        this.slidePeak = 0;
+      }
+
+      if (this.slideVel !== 0) {
+        var bleed = this.slideDecel * dt;
+        this.slideVel = this.slideVel > 0 ? Math.max(0, this.slideVel - bleed)
+                                          : Math.min(0, this.slideVel + bleed);
+        slideExtra = this.slideVel;
+      }
+
+      // Keep it inside the playable area: no sliding further out once the car
+      // is already well off the road.
+      var overrun = this.track.halfWidth + cfg.carWidth * cfg.slideOverrunLimitInCars;
+      var goingOut = (this.loc.lateral >= 0) === (slideExtra >= 0);
+      if (goingOut && Math.abs(this.loc.lateral) > overrun) slideExtra = 0;
+
+      if (slideExtra !== 0) {
+        this.x += -Math.sin(roadHeading) * slideExtra * dt;
+        this.y += Math.cos(roadHeading) * slideExtra * dt;
+      }
+    } else {
+      this.slideVel = 0;
+      this.slidePeak = 0;
+    }
+    this.slideExtra = slideExtra;
 
     // --- Re-locate against the track --------------------------------------
     this.loc = BR.track.locate(this.track, this.x, this.y, this.hint,

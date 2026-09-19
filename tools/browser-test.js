@@ -68,7 +68,10 @@ function gameState(page) {
         steerRateDeg: g.cfg.steerRateDeg, returnRateDeg: g.cfg.returnRateDeg,
         grassSlowdownPct: g.cfg.grassSlowdownPct,
         offRoadSpeedFactor: g.cfg.offRoadSpeedFactor,
-        aiCars: g.cfg.aiCars
+        aiCars: g.cfg.aiCars, lanes: g.cfg.lanes,
+        slideDistance: g.cfg.slideDistance,
+        roadWidth: g.cfg.roadWidth, laneWidth: g.cfg.laneWidth,
+        gridPerRow: g.cfg.gridPerRow
       },
       fieldSize: g.field.length,
       position: g.position,
@@ -81,13 +84,40 @@ function gameState(page) {
   });
 }
 
-/* The same proportional driver as tools/simulate.js, evaluated in the page. */
+/* The same proportional driver as tools/simulate.js, evaluated in the page —
+ * including its lane changing. Now that the player collides with traffic, a
+ * driver that ploughs straight into the field laps ~4s slower and cannot make
+ * the qualifying time, so avoiding traffic is part of driving the lap. */
 function desiredInput(page) {
   return page.evaluate(function () {
     var g = window.__game, BR = window.BR, car = g.car;
+
+    if (window.__lane === undefined) window.__lane = 0;
+    var lanes = [];
+    for (var i = 0; i < g.cfg.lanes; i++) lanes.push(BR.laneCentre(g.cfg, i) * 0.8);
+
+    var blocked = g.field.some(function (c) {
+      var ds = c.loc.s - car.loc.s;
+      return !c.finished && ds > 0 && ds < 220 &&
+             Math.abs(c.loc.lateral - car.loc.lateral) < 34;
+    });
+    if (blocked) {
+      var best = null, bestD = Infinity;
+      lanes.forEach(function (L) {
+        var clear = !g.field.some(function (c) {
+          var ds = c.loc.s - car.loc.s;
+          return !c.finished && ds > -90 && ds < 300 && Math.abs(c.loc.lateral - L) < 40;
+        });
+        var d = Math.abs(L - car.loc.lateral);
+        if (clear && d < bestD && d > 10) { best = L; bestD = d; }
+      });
+      if (best !== null) window.__lane = best;
+    }
+
     var ahead = BR.track.at(g.track,
       Math.min(g.track.length, car.loc.s + Math.max(60, car.speed * 0.35)));
-    var desired = ahead.h - Math.max(-0.7, Math.min(0.7, car.loc.lateral * 0.006));
+    var desired = ahead.h -
+      Math.max(-0.7, Math.min(0.7, (car.loc.lateral - window.__lane) * 0.010));
     var err = BR.wrapAngle(desired - car.heading);
     return err > 0.02 ? 1 : (err < -0.02 ? -1 : 0);
   });
@@ -172,7 +202,9 @@ function sectionTitleAndRace() {
       { id: 'cfg-steer-rate',    key: 'steerRateDeg',     set: '6000', shows: '6000°/s' },
       { id: 'cfg-return-rate',   key: 'returnRateDeg',    set: '120',  shows: '120°/s' },
       { id: 'cfg-grass-slowdown', key: 'grassSlowdownPct', set: '75',   shows: '75%' },
-      { id: 'cfg-ai-cars',      key: 'aiCars',          set: '40',   shows: '40' }
+      { id: 'cfg-ai-cars',      key: 'aiCars',          set: '40',   shows: '40' },
+      { id: 'cfg-lanes',         key: 'lanes',           set: '4',    shows: '4' },
+      { id: 'cfg-slide-distance', key: 'slideDistance',  set: '90',   shows: '90px' }
     ];
 
     var chain = Promise.resolve();
@@ -196,7 +228,8 @@ function sectionTitleAndRace() {
     return page.evaluate(function () {
       var ids = ['cfg-turning-angle', 'cfg-acceleration', 'cfg-steer-rate',
                  'cfg-return-rate', 'cfg-laps', 'cfg-full-speed',
-                 'cfg-grass-slowdown', 'cfg-ai-cars'];
+                 'cfg-grass-slowdown', 'cfg-ai-cars', 'cfg-lanes',
+                 'cfg-slide-distance'];
       var out = {};
       ids.forEach(function (id) {
         out[id] = {
@@ -228,6 +261,9 @@ function sectionTitleAndRace() {
     // read 75%, which startRace() happened to paper over by reloading.
     return gameState(page);
   }).then(function (s) {
+    check('lane count drives the road width live',
+          s.cfg.roadWidth === s.cfg.lanes * s.cfg.laneWidth,
+          s.cfg.lanes + ' lanes -> ' + s.cfg.roadWidth + 'px');
     check('derived physics values track the sliders live',
           Math.abs(s.cfg.offRoadSpeedFactor - (1 - s.cfg.grassSlowdownPct / 100)) < 1e-9,
           s.cfg.grassSlowdownPct + '% -> factor ' + s.cfg.offRoadSpeedFactor);
@@ -237,8 +273,14 @@ function sectionTitleAndRace() {
           s.cfg.turningAngleDeg === 45 && s.cfg.accelerationTime === 2 &&
           s.cfg.laps === 1 && s.cfg.fullSpeed === 420 &&
           s.cfg.steerRateDeg === 280 && s.cfg.returnRateDeg === 170 &&
-          s.cfg.grassSlowdownPct === 50 && s.cfg.aiCars === 12,
+          s.cfg.grassSlowdownPct === 50 && s.cfg.aiCars === 12 &&
+          s.cfg.lanes === 5 && s.cfg.slideDistance === 50,
           JSON.stringify(s.cfg));
+    check('the road width follows the lane count',
+          s.cfg.roadWidth === s.cfg.lanes * s.cfg.laneWidth &&
+          s.cfg.gridPerRow === s.cfg.lanes,
+          s.cfg.lanes + ' lanes -> ' + s.cfg.roadWidth + 'px, ' +
+          s.cfg.gridPerRow + ' per grid row');
     // The physics value has to follow the title-screen percentage.
     check('Grass Slowdown drives the physics factor',
           Math.abs(s.cfg.offRoadSpeedFactor - 0.5) < 1e-9,
@@ -305,6 +347,7 @@ var SIZES = [
 ];
 
 function sectionResolutions(cfgViewMinWorld) {
+  var physicsReference = null;
   console.log('\n=== Resolutions ===\n');
   console.log('  size              css         dpr  backing      world seen      ui');
 
@@ -356,6 +399,30 @@ function sectionResolutions(cfgViewMinWorld) {
               v.backingW === Math.round(v.w * v.dpr) && v.backingH === Math.round(v.h * v.dpr));
         check(size.name + ': touch detection matches the device',
               v.touch === !!size.touch, String(v.touch));
+
+        // Run the physics directly, off the render loop, with a scripted
+        // input. Identical results across resolutions prove the simulation
+        // never consults the viewport — a far tighter test than comparing lap
+        // times, which now swing with how traffic happens to fall.
+        return page.evaluate(function () {
+          var BR = window.BR, g = window.__game;
+          var cfg = BR.deriveConfig(JSON.parse(JSON.stringify(BR.DEFAULT_CONFIG)));
+          var track = BR.track.build(cfg);
+          var car = new BR.Car(cfg, track);
+          for (var i = 0; i < 1800; i++) {
+            var input = (i % 400 < 120) ? -1 : ((i % 400 < 240) ? 1 : 0);
+            car.update(1 / 120, input);
+          }
+          return { x: car.x, y: car.y, s: car.loc.s, speed: car.speed };
+        }).then(function (sim) { return { v: v, sim: sim, page: page }; });
+      }).then(function (bundle) {
+        var v = bundle.v, sim = bundle.sim, page = bundle.page;
+        if (!physicsReference) physicsReference = sim;
+        check(size.name + ': physics are identical regardless of resolution',
+              Math.abs(sim.x - physicsReference.x) < 1e-6 &&
+              Math.abs(sim.y - physicsReference.y) < 1e-6 &&
+              Math.abs(sim.speed - physicsReference.speed) < 1e-9,
+              'after 15s of scripted input, s=' + sim.s.toFixed(2));
         check(size.name + ': no page errors', page.__errors.length === 0,
               page.__errors.join(' | '));
         return page.close();
@@ -434,6 +501,194 @@ function sectionSenseOfSpeed() {
     check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
     return page.close();
   });
+}
+
+// ================================ 3c. lanes, collisions and slide, in browser ==
+
+/* The three new systems exercised in the real page rather than the harness:
+ * the lane count reaching the road and the grid, a collision actually
+ * happening while driving into traffic, and the slide carrying the car
+ * sideways at top speed but not below it. */
+function sectionNewSystems() {
+  console.log('\n=== Lanes, collisions and slide (in the browser) ===\n');
+
+  function withPage(setup, body) {
+    var page;
+    return newPage({ w: 1000, h: 680 }).then(function (p) {
+      page = p;
+      return setup ? setup(page) : null;
+    }).then(function () {
+      return body(page);
+    }).then(function (r) {
+      return page.close().then(function () { return r; });
+    });
+  }
+
+  function setSlider(page, id, value) {
+    return page.fill('#' + id, String(value)).then(function () {
+      return page.dispatchEvent('#' + id, 'input');
+    });
+  }
+
+  // --- lane counts reach the road, the grid and the AI ---------------------
+  var chain = Promise.resolve();
+  [3, 5, 6].forEach(function (lanes) {
+    chain = chain.then(function () {
+      return withPage(function (page) {
+        return setSlider(page, 'cfg-lanes', lanes)
+          .then(function () { return page.click('#btn-start'); })
+          .then(function () { return page.waitForTimeout(600); });
+      }, function (page) {
+        return page.evaluate(function () {
+          var g = window.__game;
+          var lats = g.field.map(function (c) { return c.loc.lateral; });
+          var distinct = [];
+          lats.forEach(function (l) {
+            if (!distinct.some(function (d) { return Math.abs(d - l) < 8; })) distinct.push(l);
+          });
+          return {
+            lanes: g.cfg.lanes, road: g.cfg.roadWidth, laneWidth: g.cfg.laneWidth,
+            perRow: g.cfg.gridPerRow, halfWidth: g.track.halfWidth,
+            distinctLanes: distinct.length,
+            widest: Math.max.apply(null, lats.map(Math.abs)),
+            cars: g.field.length
+          };
+        });
+      }).then(function (v) {
+        console.log('  ' + lanes + ' lanes: road ' + v.road + 'px, ' + v.perRow +
+                    ' per grid row, field across ' + v.distinctLanes + ' lanes');
+        check(lanes + ' lanes: road and grid follow the setting',
+              v.lanes === lanes && v.road === lanes * v.laneWidth && v.perRow === lanes);
+        check(lanes + ' lanes: the track is built to that width',
+              Math.abs(v.halfWidth - v.road / 2) < 0.001);
+        check(lanes + ' lanes: AI cars spread across the lanes, none overhanging',
+              v.distinctLanes === lanes && v.widest + 16 <= v.road / 2 + 1,
+              v.distinctLanes + ' distinct lanes, widest ' + v.widest.toFixed(0) + 'px');
+      });
+    });
+  });
+
+  // --- a collision while driving into the pack -----------------------------
+  chain = chain.then(function () {
+    return withPage(function (page) {
+      return setSlider(page, 'cfg-ai-cars', 100)
+        .then(function () { return page.click('#btn-start'); });
+    }, function (page) {
+      // Drive straight into the back of the field and watch for a contact.
+      function tick(i, best) {
+        if (i > 1400) return Promise.resolve(best);
+        return page.evaluate(function () {
+          var g = window.__game;
+          return { phase: g.phase, speed: g.car.speed, bump: g.car.bumpFlash || 0,
+                   limit: g.car.speedLimit === undefined ? -1 : g.car.speedLimit,
+                   recover: g.car.recoverFlash || 0, x: g.car.x, y: g.car.y };
+        }).then(function (st) {
+          // The off-road recovery deliberately lifts the car back onto the
+          // racing line, a ~200px jump that has nothing to do with collisions.
+          var recovered = best.prev && st.recover > best.prev.recover;
+          if (best.prev && !recovered) {
+            var step = Math.hypot(st.x - best.prev.x, st.y - best.prev.y);
+            if (step > best.maxStep) best.maxStep = step;
+          }
+          best.prev = st;
+          if (st.bump > 0 && !best.hit) {
+            best.hit = true;
+            best.speedAtHit = st.speed;
+            best.limitAtHit = st.limit;
+          }
+          return page.waitForTimeout(16).then(function () { return tick(i + 1, best); });
+        });
+      }
+      return tick(0, { hit: false, maxStep: 0 });
+    }).then(function (r) {
+      console.log('');
+      check('driving into the pack produces a collision', r.hit,
+            r.hit ? 'contact at ' + r.speedAtHit.toFixed(0) + ' px/s' : 'never touched a car');
+      check('the collision caps the player to the car hit',
+            r.hit && r.limitAtHit > 0 && r.limitAtHit < 420,
+            r.hit ? 'capped to ' + r.limitAtHit.toFixed(0) + ' px/s' : 'n/a');
+      check('nothing teleports while running through traffic',
+            r.maxStep < 60, r.maxStep.toFixed(1) + 'px between samples');
+    });
+  });
+
+  // --- the slide, at top speed and below it --------------------------------
+  function slideProbe(distance, fraction) {
+    return withPage(function (page) {
+      return setSlider(page, 'cfg-slide-distance', distance)
+        .then(function () { return setSlider(page, 'cfg-ai-cars', 5); })
+        .then(function () { return page.click('#btn-start'); });
+    }, function (page) {
+      // Wait until the car is at the requested share of top speed.
+      function waitFor() {
+        return page.evaluate(function (f) {
+          var g = window.__game;
+          if (g.phase !== 'racing') return false;
+          if (f >= 1) return g.car.speed >= g.cfg.fullSpeed - 0.5;
+          return g.car.speed >= g.cfg.fullSpeed * f;
+        }, fraction).then(function (ready) {
+          return ready ? null : page.waitForTimeout(16).then(waitFor);
+        });
+      }
+      return waitFor().then(function () {
+        // Hold the speed for the part-throttle case, then flick and release.
+        return page.evaluate(function (f) {
+          var g = window.__game;
+          if (f < 1) g.car.speedLimit = g.cfg.fullSpeed * f;
+          window.__lat0 = g.car.loc.lateral;
+        }, fraction);
+      }).then(function () {
+        return page.keyboard.down('ArrowRight');
+      }).then(function () {
+        return page.waitForTimeout(120);
+      }).then(function () {
+        return page.keyboard.up('ArrowRight');
+      }).then(function () {
+        // The slide arms on the frame AFTER the steering starts easing, so
+        // sampling at the exact moment of keyup always reads zero.
+        return page.waitForTimeout(60);
+      }).then(function () {
+        return page.evaluate(function () {
+          return { lat: window.__game.car.loc.lateral, start: window.__lat0,
+                   slide: window.__game.car.slideVel };
+        });
+      }).then(function (a) {
+        return page.waitForTimeout(1500).then(function () {
+          return page.evaluate(function () {
+            return { lat: window.__game.car.loc.lateral, start: window.__lat0 };
+          });
+        }).then(function (b) {
+          return { moved: b.lat - a.start, slideAtRelease: a.slide };
+        });
+      });
+    });
+  }
+
+  chain = chain.then(function () {
+    return Promise.resolve()
+      .then(function () { return slideProbe(0, 1); })
+      .then(function (off) {
+        return slideProbe(120, 1).then(function (on) {
+          console.log('');
+          console.log('  same flick at top speed: no slide moved ' + off.moved.toFixed(0) +
+                      'px, 120px slide moved ' + on.moved.toFixed(0) + 'px');
+          check('at top speed the slide carries the car further',
+                on.moved > off.moved + 40,
+                (on.moved - off.moved).toFixed(0) + 'px further across');
+          check('the slide is live when the keys are released',
+                Math.abs(on.slideAtRelease) > 1,
+                on.slideAtRelease.toFixed(0) + ' px/s of drift');
+        });
+      })
+      .then(function () { return slideProbe(120, 0.7); })
+      .then(function (slow) {
+        check('below top speed there is no slide at all',
+              Math.abs(slow.slideAtRelease) < 1e-6,
+              slow.slideAtRelease.toFixed(3) + ' px/s of drift');
+      });
+  });
+
+  return chain;
 }
 
 // ================================================================ 4. touch ==
@@ -532,10 +787,13 @@ function sectionPhoneLap(desktopLap) {
                 's    difference ' + Math.abs(phoneLap - desktopLap).toFixed(2) + 's\n');
     check('a full lap is completable on a phone', true, phoneLap.toFixed(2) + 's');
     check('the phone lap qualifies', phoneLap <= r.final.qualifying);
-    // Physics are in absolute world units and never touch the viewport, so the
-    // only difference should be how well the crude autopilot happens to drive.
-    check('phone and desktop lap times agree within 0.5s',
-          Math.abs(phoneLap - desktopLap) < 0.5,
+    // Physics being resolution-independent is asserted exactly in the
+    // resolutions section, by stepping the simulation directly. This is the
+    // looser end-to-end version: with traffic and collisions in play, small
+    // timing differences change which cars get passed where, so two real laps
+    // no longer land within a few hundredths of each other.
+    check('phone and desktop laps are comparable',
+          Math.abs(phoneLap - desktopLap) < 3.0,
           Math.abs(phoneLap - desktopLap).toFixed(2) + 's apart');
     check('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
     return page.close();
@@ -560,6 +818,8 @@ chromium.launch().then(function (b) {
   return sectionResolutions(viewMinWorld);
 }).then(function () {
   return sectionSenseOfSpeed();
+}).then(function () {
+  return sectionNewSystems();
 }).then(function () {
   return sectionTouch();
 }).then(function () {
